@@ -88,6 +88,7 @@ pub fn draw(frame: &mut Frame, state: &mut AppState) {
     }
 
     if state.is_ask_popup_open() {
+        state.layout.hyperlink_overlays.clear();
         panes::render_ask_popup(frame, state, area);
     }
 }

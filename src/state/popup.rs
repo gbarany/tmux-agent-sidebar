@@ -20,6 +20,22 @@ impl AskScope {
             Self::All => "All visible agents",
         }
     }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Selected => Self::Repo,
+            Self::Repo => Self::All,
+            Self::All => Self::Selected,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Selected => Self::All,
+            Self::Repo => Self::Selected,
+            Self::All => Self::Repo,
+        }
+    }
 }
 
 /// Editable state owned by the ask popup.
@@ -181,6 +197,18 @@ impl AppState {
     pub fn ask_input_pop_char(&mut self) {
         if let PopupState::Ask(ask) = &mut self.popup {
             ask.question.pop();
+        }
+    }
+
+    pub fn ask_scope_next(&mut self) {
+        if let PopupState::Ask(ask) = &mut self.popup {
+            ask.scope = ask.scope.next();
+        }
+    }
+
+    pub fn ask_scope_prev(&mut self) {
+        if let PopupState::Ask(ask) = &mut self.popup {
+            ask.scope = ask.scope.prev();
         }
     }
 
@@ -591,6 +619,16 @@ mod tests {
     }
 
     #[test]
+    fn ask_scope_cycles_in_both_directions() {
+        assert_eq!(AskScope::Selected.next(), AskScope::Repo);
+        assert_eq!(AskScope::Repo.next(), AskScope::All);
+        assert_eq!(AskScope::All.next(), AskScope::Selected);
+        assert_eq!(AskScope::Selected.prev(), AskScope::All);
+        assert_eq!(AskScope::All.prev(), AskScope::Repo);
+        assert_eq!(AskScope::Repo.prev(), AskScope::Selected);
+    }
+
+    #[test]
     fn ask_input_edits_unicode_question_and_close_discards_it() {
         let mut state = AppState::new("%99".into());
         state.open_ask_popup();
@@ -604,6 +642,24 @@ mod tests {
 
         state.close_ask_popup();
         assert!(matches!(state.popup, PopupState::None));
+    }
+
+    #[test]
+    fn ask_popup_consumes_inside_click_and_closes_on_outside_click() {
+        let mut state = AppState::new("%99".into());
+        state.global.selected_pane_row = 2;
+        state.open_ask_popup();
+        state
+            .popup
+            .set_ask_area(Some(ratatui::layout::Rect::new(5, 5, 20, 8)));
+
+        state.handle_mouse_click(6, 6);
+        assert!(state.is_ask_popup_open());
+        assert_eq!(state.global.selected_pane_row, 2);
+
+        state.handle_mouse_click(0, 0);
+        assert!(!state.is_ask_popup_open());
+        assert_eq!(state.global.selected_pane_row, 2);
     }
 
     #[test]

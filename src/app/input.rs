@@ -64,6 +64,8 @@ pub(super) fn handle_key_event(
     if state.is_ask_popup_open() {
         match key.code {
             KeyCode::Esc => state.close_ask_popup(),
+            KeyCode::Tab => state.ask_scope_next(),
+            KeyCode::BackTab => state.ask_scope_prev(),
             KeyCode::Backspace => state.ask_input_pop_char(),
             KeyCode::Char(c) => state.ask_input_push_char(c),
             _ => {}
@@ -380,6 +382,26 @@ mod tests {
 
         assert!(!state.is_ask_popup_open());
         assert_eq!(state.global.selected_pane_row, 1);
+    }
+
+    #[test]
+    fn tab_cycles_ask_scope_without_editing_question() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        state.open_ask_popup();
+
+        handle_key_event(key(KeyCode::Tab), &mut state, &flag);
+        let crate::state::PopupState::Ask(ask) = &state.popup else {
+            panic!("ask popup should remain open");
+        };
+        assert_eq!(ask.scope, crate::state::AskScope::Repo);
+        assert_eq!(ask.question, crate::state::DEFAULT_ASK_PROMPT);
+
+        handle_key_event(key(KeyCode::BackTab), &mut state, &flag);
+        let crate::state::PopupState::Ask(ask) = &state.popup else {
+            panic!("ask popup should remain open");
+        };
+        assert_eq!(ask.scope, crate::state::AskScope::Selected);
     }
 
     #[test]

@@ -24,7 +24,7 @@ fn snapshot_ask_popup_default_prompt() {
     proj
     ┃ ○ claude
     ╭ Ask agents ──────────────────────────╮
-    │ SCOPE                                │
+    │ SCOPE (Tab to change)                │
     │ Selected agent                       │
     │ QUESTION                             │
     │ What are you working on right now?█  │
@@ -53,7 +53,7 @@ fn snapshot_ask_popup_edited_prompt() {
     insta::assert_snapshot!(output, @"
      ≡1  ●0  ◎0  ◐0  ○1  ✕0
     ╭ Ask agents ──────────────────╮
-    │ SCOPE                        │
+    │ SCOPE (Tab to change)        │
     │ Selected agent               │
     │ QUESTION                     │
     │ Summarize your current task█ │
@@ -76,7 +76,7 @@ fn snapshot_ask_popup_compact_runtime_layout() {
     let output = render_to_string(&mut state, 50, 28);
     insta::assert_snapshot!(output, @"
      ≡1  ╭ Ask agents ──────────────────────────╮
-    ⓘ    │ Scope: Selected agent                │  — ▾
+    ⓘ    │ Scope [Tab]: Selected agent          │  — ▾
     proj │ QUESTION                             │
     ┃ ○ c│ What are you working on right now?█  │
         W│ Enter submit                         │

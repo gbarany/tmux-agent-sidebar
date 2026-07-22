@@ -151,7 +151,7 @@ pub(super) fn render_ask_popup(frame: &mut Frame, state: &mut AppState, area: Re
     let render_scope = |frame: &mut Frame, y: u16, include_label: bool| {
         let mut spans = Vec::new();
         if include_label {
-            spans.push(Span::styled("Scope: ", label));
+            spans.push(Span::styled("Scope [Tab]: ", label));
         }
         spans.push(Span::styled(
             truncate_to_width(scope.label(), content_width),
@@ -190,7 +190,7 @@ pub(super) fn render_ask_popup(frame: &mut Frame, state: &mut AppState, area: Re
         render_hint(frame, 3, "Enter", " submit");
         render_hint(frame, 4, "Ctrl+Enter", " force send");
     } else {
-        render_row(frame, 0, vec![Span::styled("SCOPE", label)]);
+        render_row(frame, 0, vec![Span::styled("SCOPE (Tab to change)", label)]);
         render_scope(frame, 1, false);
         render_row(frame, 3, vec![Span::styled("QUESTION", label)]);
         render_question(frame, 4);

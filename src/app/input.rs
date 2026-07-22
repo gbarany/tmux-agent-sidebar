@@ -21,6 +21,9 @@ pub(super) fn handle_event(
     match ev {
         Event::Key(key) => handle_key_event(key, state, git_tab_active),
         Event::Mouse(mouse) => {
+            if handle_ask_mouse_event(mouse, state) {
+                return true;
+            }
             let term_height = terminal.size().map(|s| s.height).unwrap_or(0);
             let bottom_h = state.bottom_panel_height;
             match mouse.kind {
@@ -50,6 +53,16 @@ pub(super) fn handle_event(
         }
         _ => false,
     }
+}
+
+fn handle_ask_mouse_event(mouse: crossterm::event::MouseEvent, state: &mut AppState) -> bool {
+    if !state.is_ask_popup_open() {
+        return false;
+    }
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+        state.handle_mouse_click(mouse.row, mouse.column);
+    }
+    true
 }
 
 /// Dispatch a single [`KeyEvent`]. Split out from [`handle_event`] so that
@@ -402,6 +415,25 @@ mod tests {
             panic!("ask popup should remain open");
         };
         assert_eq!(ask.scope, crate::state::AskScope::Selected);
+    }
+
+    #[test]
+    fn ask_popup_consumes_bottom_panel_mouse_events_before_tab_routing() {
+        let mut state = state_with_three_panes();
+        state.open_ask_popup();
+        state
+            .popup
+            .set_ask_area(Some(ratatui::layout::Rect::new(5, 5, 20, 8)));
+        let mouse = crossterm::event::MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 20,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        assert!(handle_ask_mouse_event(mouse, &mut state));
+        assert!(!state.is_ask_popup_open());
+        assert_eq!(state.bottom_tab, BottomTab::Activity);
     }
 
     #[test]

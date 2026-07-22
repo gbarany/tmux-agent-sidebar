@@ -148,16 +148,15 @@ pub(super) fn render_ask_popup(frame: &mut Frame, state: &mut AppState, area: Re
         .fg(theme.text_muted)
         .add_modifier(Modifier::BOLD);
 
-    let render_scope = |frame: &mut Frame, y: u16, include_label: bool| {
-        let mut spans = Vec::new();
-        if include_label {
-            spans.push(Span::styled("Scope [Tab]: ", label));
-        }
-        spans.push(Span::styled(
-            truncate_to_width(scope.label(), content_width),
-            Style::default().fg(theme.text_active),
-        ));
-        render_row(frame, y, spans);
+    let render_scope = |frame: &mut Frame, y: u16| {
+        render_row(
+            frame,
+            y,
+            vec![Span::styled(
+                truncate_to_width(scope.label(), content_width),
+                Style::default().fg(theme.text_active),
+            )],
+        );
     };
     let render_question = |frame: &mut Frame, y: u16| {
         render_row(
@@ -184,14 +183,14 @@ pub(super) fn render_ask_popup(frame: &mut Frame, state: &mut AppState, area: Re
     };
 
     if compact {
-        render_scope(frame, 0, true);
+        render_scope(frame, 0);
         render_row(frame, 1, vec![Span::styled("QUESTION", label)]);
         render_question(frame, 2);
         render_hint(frame, 3, "Enter", " submit");
         render_hint(frame, 4, "Ctrl+Enter", " force send");
     } else {
         render_row(frame, 0, vec![Span::styled("SCOPE (Tab to change)", label)]);
-        render_scope(frame, 1, false);
+        render_scope(frame, 1);
         render_row(frame, 3, vec![Span::styled("QUESTION", label)]);
         render_question(frame, 4);
         render_hint(frame, 6, "Enter", " submit");

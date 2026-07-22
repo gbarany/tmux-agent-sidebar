@@ -23,6 +23,7 @@ fn snapshot_ask_popup_default_prompt() {
     ⓘ                                    — ▾
     proj
     ┃ ○ claude
+        Waiting for prompt…
     ╭ Ask agents ──────────────────────────╮
     │ SCOPE (Tab to change)                │
     │ Selected agent                       │
@@ -52,6 +53,8 @@ fn snapshot_ask_popup_edited_prompt() {
     let output = render_to_string(&mut state, 32, 18);
     insta::assert_snapshot!(output, @"
      ≡1  ●0  ◎0  ◐0  ○1  ✕0
+    ⓘ                            — ▾
+    proj
     ╭ Ask agents ──────────────────╮
     │ SCOPE (Tab to change)        │
     │ Selected agent               │
@@ -67,24 +70,67 @@ fn snapshot_ask_popup_edited_prompt() {
 }
 
 #[test]
-fn snapshot_ask_popup_compact_runtime_layout() {
+fn snapshot_ask_popup_default_panel_at_24_rows() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
     let mut state = make_state_for_popup_tests(vec![make_repo_group("proj", vec![pane])]);
     state.bottom_panel_height = 20;
     state.open_ask_popup();
 
-    let output = render_to_string(&mut state, 50, 28);
+    let output = render_to_string(&mut state, 50, 24);
     insta::assert_snapshot!(output, @"
-     ≡1  ╭ Ask agents ──────────────────────────╮
-    ⓘ    │ Scope [Tab]: Selected agent          │  — ▾
-    proj │ QUESTION                             │
-    ┃ ○ c│ What are you working on right now?█  │
-        W│ Enter submit                         │
-         │ Ctrl+Enter force send                │
-         ╰──────────────────────────────────────╯
+     ≡1  ●0  ◎0  ◐0  ○1  ✕0
+    ⓘ                                              — ▾
+        Waiting for prompt…
     ╭ Activity │ Git ────────────────────────────────╮
-    │                 No activity yet                │
+    │    ╭ Ask agents ──────────────────────────╮    │
+    │    │ SCOPE (Tab to change)                │    │
+    │    │ Selected agent                       │    │
+    │    │ QUESTION                             │    │
+    │    │ What are you working on right now?█  │    │
+    │    │ Enter submit                         │    │
+    │    │ Ctrl+Enter force send                │    │
+    │    ╰──────────────────────────────────────╯    │
     ╰────────────────────────────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_ask_popup_compact_short_terminal() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state_for_popup_tests(vec![make_repo_group("proj", vec![pane])]);
+    state.bottom_panel_height = 0;
+    state.open_ask_popup();
+
+    let output = render_to_string(&mut state, 40, 9);
+    insta::assert_snapshot!(output, @"
+    ╭ Ask agents ──────────────────────────╮
+    │ Selected agent                       │
+    │ QUESTION                             │
+    │ What are you working on right now?█  │
+    │ Enter submit                         │
+    │ Ctrl+Enter force send                │
+    ╰──────────────────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_ask_popup_narrow_scope_remains_visible() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state_for_popup_tests(vec![make_repo_group("proj", vec![pane])]);
+    state.bottom_panel_height = 0;
+    state.open_ask_popup();
+
+    let output = render_to_string(&mut state, 12, 14);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◎0
+    ╭ Ask agen…╮
+    │ SCOPE (T │
+    │ Selecte… │
+    │ QUESTION │
+    │ …t now?█ │
+    │ Enter su │
+    │ Ctrl+Ent │
+    ╰──────────╯
     ");
 }
 

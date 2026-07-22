@@ -12,6 +12,83 @@ use tmux_agent_sidebar::tmux::{
 // ─── UI Snapshot Tests ─────────────────────────────────────────────
 
 #[test]
+fn snapshot_ask_popup_default_prompt() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state_for_popup_tests(vec![make_repo_group("proj", vec![pane])]);
+    state.open_ask_popup();
+
+    let output = render_to_string(&mut state, 40, 24);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◎0  ◐0  ○1  ✕0
+    ⓘ                                    — ▾
+    proj
+    ┃ ○ claude
+    ╭ Ask agents ──────────────────────────╮
+    │ SCOPE                                │
+    │ Selected agent                       │
+    │ QUESTION                             │
+    │ What are you working on right now?█  │
+    │ Enter submit                         │
+    │ Ctrl+Enter force send                │
+    ╰──────────────────────────────────────╯
+    ╭ Activity │ Git ──────────────────────╮
+    │            No activity yet           │
+    ╰──────────────────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_ask_popup_edited_prompt() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state_for_popup_tests(vec![make_repo_group("proj", vec![pane])]);
+    state.open_ask_popup();
+    if let PopupState::Ask(ask) = &mut state.popup {
+        ask.question.clear();
+    }
+    for c in "Summarize your current task".chars() {
+        state.ask_input_push_char(c);
+    }
+
+    let output = render_to_string(&mut state, 32, 18);
+    insta::assert_snapshot!(output, @"
+     ≡1  ●0  ◎0  ◐0  ○1  ✕0
+    ╭ Ask agents ──────────────────╮
+    │ SCOPE                        │
+    │ Selected agent               │
+    │ QUESTION                     │
+    │ Summarize your current task█ │
+    │ Enter submit                 │
+    │ Ctrl+Enter force send        │
+    ╰──────────────────────────────╯
+    ╭ Activity │ Git ──────────────╮
+    │        No activity yet       │
+    ╰──────────────────────────────╯
+    ");
+}
+
+#[test]
+fn snapshot_ask_popup_compact_runtime_layout() {
+    let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
+    let mut state = make_state_for_popup_tests(vec![make_repo_group("proj", vec![pane])]);
+    state.bottom_panel_height = 20;
+    state.open_ask_popup();
+
+    let output = render_to_string(&mut state, 50, 28);
+    insta::assert_snapshot!(output, @"
+     ≡1  ╭ Ask agents ──────────────────────────╮
+    ⓘ    │ Scope: Selected agent                │  — ▾
+    proj │ QUESTION                             │
+    ┃ ○ c│ What are you working on right now?█  │
+        W│ Enter submit                         │
+         │ Ctrl+Enter force send                │
+         ╰──────────────────────────────────────╯
+    ╭ Activity │ Git ────────────────────────────────╮
+    │                 No activity yet                │
+    ╰────────────────────────────────────────────────╯
+    ");
+}
+
+#[test]
 fn snapshot_single_agent_idle_ui() {
     let pane = make_pane(AgentType::Claude, PaneStatus::Idle);
     let mut state = make_state(vec![SessionInfo {

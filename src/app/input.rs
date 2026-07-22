@@ -61,6 +61,15 @@ pub(super) fn handle_key_event(
     state: &mut AppState,
     git_tab_active: &AtomicBool,
 ) -> bool {
+    if state.is_ask_popup_open() {
+        match key.code {
+            KeyCode::Esc => state.close_ask_popup(),
+            KeyCode::Backspace => state.ask_input_pop_char(),
+            KeyCode::Char(c) => state.ask_input_push_char(c),
+            _ => {}
+        }
+        return true;
+    }
     if state.is_notices_popup_open() {
         if key.code == KeyCode::Esc {
             state.close_notices_popup();
@@ -145,6 +154,11 @@ pub(super) fn handle_key_event(
         KeyCode::Char('x') => {
             if state.focus_state.focus == Focus::Panes {
                 state.open_remove_confirm();
+            }
+        }
+        KeyCode::Char('a') => {
+            if state.focus_state.focus == Focus::Panes {
+                state.open_ask_popup();
             }
         }
         KeyCode::Enter => {
@@ -326,6 +340,45 @@ mod tests {
         state.global.selected_pane_row = 1;
         let flag = AtomicBool::new(false);
         handle_key_event(key(KeyCode::Char('p')), &mut state, &flag);
+        assert_eq!(state.global.selected_pane_row, 1);
+    }
+
+    #[test]
+    fn bare_a_opens_ask_popup_from_panes() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+
+        handle_key_event(key(KeyCode::Char('a')), &mut state, &flag);
+
+        assert!(state.is_ask_popup_open());
+    }
+
+    #[test]
+    fn ask_popup_handles_editing_before_pane_navigation() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        state.open_ask_popup();
+
+        handle_key_event(key(KeyCode::Char('j')), &mut state, &flag);
+        handle_key_event(key(KeyCode::Backspace), &mut state, &flag);
+
+        assert_eq!(state.global.selected_pane_row, 0);
+        let crate::state::PopupState::Ask(ask) = &state.popup else {
+            panic!("ask popup should remain open");
+        };
+        assert_eq!(ask.question, crate::state::DEFAULT_ASK_PROMPT);
+    }
+
+    #[test]
+    fn escape_closes_ask_popup_without_changing_selection() {
+        let mut state = state_with_three_panes();
+        let flag = AtomicBool::new(false);
+        state.global.selected_pane_row = 1;
+        state.open_ask_popup();
+
+        handle_key_event(key(KeyCode::Esc), &mut state, &flag);
+
+        assert!(!state.is_ask_popup_open());
         assert_eq!(state.global.selected_pane_row, 1);
     }
 

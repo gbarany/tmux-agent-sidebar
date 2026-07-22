@@ -1,5 +1,45 @@
 use super::AppState;
 
+pub const DEFAULT_ASK_PROMPT: &str = "What are you working on right now?";
+
+/// Target group selected in the ask popup. Target resolution is handled by
+/// the ask sending flow; this state only records the user's selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AskScope {
+    #[default]
+    Selected,
+    Repo,
+    All,
+}
+
+impl AskScope {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Selected => "Selected agent",
+            Self::Repo => "Current repo",
+            Self::All => "All visible agents",
+        }
+    }
+}
+
+/// Editable state owned by the ask popup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskState {
+    pub question: String,
+    pub scope: AskScope,
+    pub area: Option<ratatui::layout::Rect>,
+}
+
+impl Default for AskState {
+    fn default() -> Self {
+        Self {
+            question: DEFAULT_ASK_PROMPT.into(),
+            scope: AskScope::Selected,
+            area: None,
+        }
+    }
+}
+
 /// Focus target inside the spawn input popup. Tab / Shift+Tab / arrow
 /// keys cycle through these in order; only `Task` accepts text input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -42,6 +82,7 @@ pub enum PopupState {
     Notices {
         area: Option<ratatui::layout::Rect>,
     },
+    Ask(AskState),
     /// Modal text input shown when the user presses `n` (or clicks `+`)
     /// to spawn a new worktree. `target_repo` / `target_repo_root` pin
     /// the spawn target; `agent_idx` / `mode_idx` index into
@@ -99,9 +140,50 @@ impl PopupState {
             *area = rect;
         }
     }
+
+    pub fn set_ask_area(&mut self, rect: Option<ratatui::layout::Rect>) {
+        if let Self::Ask(ask) = self {
+            ask.area = rect;
+        }
+    }
 }
 
 impl AppState {
+    // ─── Ask popup (a key) ───────────────────────────────────────────────
+
+    pub fn is_ask_popup_open(&self) -> bool {
+        matches!(self.popup, PopupState::Ask(_))
+    }
+
+    pub fn ask_popup_area(&self) -> Option<ratatui::layout::Rect> {
+        match &self.popup {
+            PopupState::Ask(ask) => ask.area,
+            _ => None,
+        }
+    }
+
+    pub fn open_ask_popup(&mut self) {
+        self.popup = PopupState::Ask(AskState::default());
+    }
+
+    pub fn close_ask_popup(&mut self) {
+        if self.is_ask_popup_open() {
+            self.popup = PopupState::None;
+        }
+    }
+
+    pub fn ask_input_push_char(&mut self, c: char) {
+        if let PopupState::Ask(ask) = &mut self.popup {
+            ask.question.push(c);
+        }
+    }
+
+    pub fn ask_input_pop_char(&mut self) {
+        if let PopupState::Ask(ask) = &mut self.popup {
+            ask.question.pop();
+        }
+    }
+
     // ─── Repo popup ──────────────────────────────────────────────────────
 
     pub fn is_repo_popup_open(&self) -> bool {
@@ -499,6 +581,30 @@ mod tests {
     }
 
     // ─── SpawnField cycle ────────────────────────────────────────────
+
+    #[test]
+    fn ask_state_defaults_to_selected_scope_and_prompt() {
+        let ask = AskState::default();
+        assert_eq!(ask.scope, AskScope::Selected);
+        assert_eq!(ask.question, DEFAULT_ASK_PROMPT);
+        assert_eq!(ask.area, None);
+    }
+
+    #[test]
+    fn ask_input_edits_unicode_question_and_close_discards_it() {
+        let mut state = AppState::new("%99".into());
+        state.open_ask_popup();
+        state.ask_input_push_char('？');
+        state.ask_input_pop_char();
+
+        let PopupState::Ask(ask) = &state.popup else {
+            panic!("ask popup should be open");
+        };
+        assert_eq!(ask.question, DEFAULT_ASK_PROMPT);
+
+        state.close_ask_popup();
+        assert!(matches!(state.popup, PopupState::None));
+    }
 
     #[test]
     fn spawn_field_next_and_prev_cycle() {

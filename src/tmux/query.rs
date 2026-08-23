@@ -6,9 +6,9 @@ use crate::process::{ProcessSnapshot, command_basename};
 use super::commands::run_tmux;
 use super::options::{
     PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME, PANE_PENDING_SESSION_END,
-    PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_SOURCE, PANE_ROLE,
-    PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS, PANE_WAIT_REASON,
-    PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
+    PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_ID,
+    PANE_PROMPT_SOURCE, PANE_ROLE, PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS,
+    PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
 };
 use super::types::{
     AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
@@ -267,7 +267,7 @@ fn parse_pane_fields_with_processes(
     let current_command = parts[pane_line_field::PANE_CURRENT_COMMAND].as_str();
     let pane_pid: Option<u32> = parts[pane_line_field::PANE_PID].parse().ok();
 
-    // Codex / OpenCode panes can leave stale tmux metadata behind after the
+    // Codex / Grok / OpenCode panes can leave stale tmux metadata behind after the
     // agent exits and the pane falls back to the user's shell. Neither
     // agent exposes a reliable "process exit" hook (Codex has no such
     // hook, OpenCode runs under Bun where `process.on("exit")` does not
@@ -276,7 +276,10 @@ fn parse_pane_fields_with_processes(
     // is gone. Subsequent polls short-circuit at the `AgentType::from_label`
     // check above once `@pane_agent` has been cleared. Claude is excluded
     // because its SessionEnd hook drives cleanup instead.
-    if matches!(agent, AgentType::Codex | AgentType::OpenCode) && is_shell_command(current_command)
+    if matches!(
+        agent,
+        AgentType::Codex | AgentType::Grok | AgentType::OpenCode
+    ) && is_shell_command(current_command)
     {
         let agent_still_alive = pane_pid
             .and_then(|pid| {
@@ -299,7 +302,7 @@ fn parse_pane_fields_with_processes(
 
     // Claude: read permission_mode from hook-set tmux variable.
     // Codex / OpenCode: no permission_mode in hooks, keep the default.
-    let permission_mode = if agent == AgentType::Claude {
+    let permission_mode = if matches!(agent, AgentType::Claude | AgentType::Grok) {
         PermissionMode::from_label(&parts[pane_line_field::PERMISSION_MODE])
     } else {
         PermissionMode::Default
@@ -362,6 +365,7 @@ fn clear_agent_pane_state(pane_id: &str) {
     const KEYS: &[&str] = &[
         PANE_AGENT,
         PANE_PROMPT,
+        PANE_PROMPT_ID,
         PANE_PROMPT_SOURCE,
         PANE_BG_CMD,
         PANE_SUBAGENTS,
@@ -444,8 +448,12 @@ fn pane_output_needs_process_snapshot(all_panes_output: &str) -> bool {
             return false;
         }
         let pane_fields = &parts[session_line_field::PANE_LINE_OFFSET..];
-        AgentType::from_label(&pane_fields[pane_line_field::AGENT])
-            .is_some_and(|agent| matches!(agent, AgentType::Codex | AgentType::OpenCode))
+        AgentType::from_label(&pane_fields[pane_line_field::AGENT]).is_some_and(|agent| {
+            matches!(
+                agent,
+                AgentType::Codex | AgentType::Grok | AgentType::OpenCode
+            )
+        })
     })
 }
 
@@ -1056,6 +1064,70 @@ mod tests {
             Some("keep me"),
             "live Codex panes must not be swept just because tmux reports a shell"
         );
+    }
+
+    #[test]
+    fn parse_pane_fields_recognizes_grok_and_hook_permission_mode() {
+        let mut fields = full_fields();
+        fields[pane_line_field::AGENT] = "grok";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "grok";
+        fields[pane_line_field::PERMISSION_MODE] = "auto";
+        let fields = field_strings(&fields);
+
+        let pane = parse_pane_fields_with_processes(&fields, None).expect("Grok pane");
+
+        assert_eq!(pane.agent, AgentType::Grok);
+        assert_eq!(pane.permission_mode, PermissionMode::Auto);
+    }
+
+    #[test]
+    fn parse_pane_fields_keeps_grok_shell_pane_when_process_is_alive() {
+        let _guard = test_mock::install();
+        let pane = "%GROK_LIVE";
+        test_mock::set(pane, PANE_AGENT, "grok");
+        test_mock::set(pane, PANE_PROMPT, "keep me");
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "grok";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
+        fields[pane_line_field::PANE_PID] = "300";
+        let fields = field_strings(&fields);
+        let snapshot =
+            process_snapshot("300 1 zsh zsh -c grok\n301 300 grok /Users/alice/.grok/bin/grok\n");
+
+        let pane_info = parse_pane_fields_with_processes(&fields, Some(&snapshot))
+            .expect("live Grok child process should keep pane visible");
+
+        assert_eq!(pane_info.agent, AgentType::Grok);
+        assert_eq!(
+            test_mock::get(pane, PANE_PROMPT).as_deref(),
+            Some("keep me")
+        );
+    }
+
+    #[test]
+    fn parse_pane_line_wipes_stale_state_for_grok_shell_pane() {
+        let _guard = test_mock::install();
+        let pane = "%GROK_STALE";
+        test_mock::set(pane, PANE_AGENT, "grok");
+        test_mock::set(pane, PANE_PROMPT, "previous prompt");
+        test_mock::set(pane, PANE_PROMPT_ID, "prompt-old");
+        test_mock::set(pane, PANE_STATUS, "running");
+
+        let mut fields = full_fields();
+        fields[pane_line_field::PANE_ID] = pane;
+        fields[pane_line_field::AGENT] = "grok";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "zsh";
+        let line = make_pane_line(&fields);
+
+        assert!(parse_pane_line(&line).is_none());
+        for key in [PANE_AGENT, PANE_PROMPT, PANE_PROMPT_ID, PANE_STATUS] {
+            assert!(
+                !test_mock::contains(pane, key),
+                "{key} must be cleared when a Grok pane falls back to shell"
+            );
+        }
     }
 
     #[test]

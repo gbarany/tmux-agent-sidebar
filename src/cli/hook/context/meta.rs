@@ -57,6 +57,7 @@ pub(in crate::cli::hook) fn clear_all_meta(pane: &str) {
     for key in &[
         tmux::PANE_AGENT,
         tmux::PANE_PROMPT,
+        tmux::PANE_PROMPT_ID,
         tmux::PANE_PROMPT_SOURCE,
         tmux::PANE_BG_CMD,
         tmux::PANE_SUBAGENTS,
@@ -264,6 +265,7 @@ mod tests {
         for key in [
             tmux::PANE_AGENT,
             tmux::PANE_PROMPT,
+            tmux::PANE_PROMPT_ID,
             tmux::PANE_PROMPT_SOURCE,
             tmux::PANE_SUBAGENTS,
             tmux::PANE_CWD,
@@ -284,6 +286,7 @@ mod tests {
         for key in [
             tmux::PANE_AGENT,
             tmux::PANE_PROMPT,
+            tmux::PANE_PROMPT_ID,
             tmux::PANE_PROMPT_SOURCE,
             tmux::PANE_SUBAGENTS,
             tmux::PANE_CWD,

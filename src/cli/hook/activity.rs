@@ -87,7 +87,7 @@ pub(super) fn handle_activity_log(
 
 fn is_background_bash(tool_name: &str, tool_input: &serde_json::Value) -> bool {
     tool_name == CanonicalTool::Bash.as_str()
-        && ["run_in_background", "runInBackground"]
+        && ["run_in_background", "runInBackground", "background"]
             .iter()
             .any(|key| tool_input.get(key).and_then(|v| v.as_bool()) == Some(true))
 }
@@ -251,6 +251,22 @@ mod tests {
             "command string must be stored so the row body can show what is running",
         );
         fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn handle_activity_log_marks_grok_background_bash() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_BG_BASH";
+        handle_activity_log(
+            pane,
+            "Bash",
+            &json!({"command": "npm run dev", "background": true}),
+            &Value::Null,
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_BG_CMD).as_deref(),
+            Some("npm run dev")
+        );
     }
 
     #[test]

@@ -63,6 +63,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             cwd,
             permission_mode,
             prompt,
+            prompt_id,
             worktree,
             session_id,
             ..
@@ -70,6 +71,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             pane,
             &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
             &prompt,
+            prompt_id.as_deref(),
         ),
         AgentEvent::Notification {
             agent,
@@ -96,6 +98,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             permission_mode,
             last_message,
             response,
+            prompt_id,
             worktree,
             session_id,
             ..
@@ -106,14 +109,29 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
                 &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
                 &last_message,
                 response.as_deref(),
+                prompt_id.as_deref(),
                 &notifications,
             )
         }
+        AgentEvent::TurnSettled {
+            agent,
+            cwd,
+            permission_mode,
+            prompt_id,
+            worktree,
+            session_id,
+            ..
+        } => handlers::on_turn_settled(
+            pane,
+            &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
+            prompt_id.as_deref(),
+        ),
         AgentEvent::StopFailure {
             agent,
             cwd,
             permission_mode,
             error,
+            prompt_id,
             worktree,
             session_id,
             ..
@@ -123,6 +141,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
                 pane,
                 &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
                 &error,
+                prompt_id.as_deref(),
                 &notifications,
             )
         }

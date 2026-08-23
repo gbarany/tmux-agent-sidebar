@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use super::AgentEvent;
 use crate::adapter;
-use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT, OPENCODE_AGENT};
+use crate::tmux::{CLAUDE_AGENT, CODEX_AGENT, GROK_AGENT, OPENCODE_AGENT};
 
 /// Adapter that converts external agent events into internal `AgentEvent`.
 pub trait EventAdapter {
@@ -13,6 +13,7 @@ pub fn resolve_adapter(agent_name: &str) -> Option<Box<dyn EventAdapter>> {
     match agent_name {
         CLAUDE_AGENT => Some(Box::new(adapter::claude::ClaudeAdapter)),
         CODEX_AGENT => Some(Box::new(adapter::codex::CodexAdapter)),
+        GROK_AGENT => Some(Box::new(adapter::grok::GrokAdapter)),
         OPENCODE_AGENT => Some(Box::new(adapter::opencode::OpenCodeAdapter)),
         _ => None,
     }
@@ -46,6 +47,62 @@ mod tests {
     fn resolve_opencode() {
         let adapter = resolve_adapter("opencode");
         assert!(adapter.is_some());
+    }
+
+    #[test]
+    fn resolve_grok_parses_camel_case_session_start() {
+        let adapter = resolve_adapter("grok").expect("Grok adapter should resolve");
+        let event = adapter
+            .parse(
+                "session-start",
+                &json!({
+                    "cwd": "/tmp/project",
+                    "permissionMode": "auto",
+                    "sessionId": "grok-session-1",
+                    "source": "resume"
+                }),
+            )
+            .expect("Grok SessionStart should parse");
+
+        assert_eq!(
+            event,
+            AgentEvent::SessionStart {
+                agent: "grok".into(),
+                cwd: "/tmp/project".into(),
+                permission_mode: "auto".into(),
+                source: "resume".into(),
+                worktree: None,
+                agent_id: None,
+                session_id: Some("grok-session-1".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn resolve_grok_normalizes_native_tool_payload() {
+        let adapter = resolve_adapter("grok").expect("Grok adapter should resolve");
+        let event = adapter
+            .parse(
+                "activity-log",
+                &json!({
+                    "toolName": "read_file",
+                    "toolInput": {"path": "/tmp/project/src/main.rs"},
+                    "toolResult": {"content": "fn main() {}"}
+                }),
+            )
+            .expect("Grok PostToolUse should parse");
+
+        assert_eq!(
+            event,
+            AgentEvent::ActivityLog {
+                tool_name: "Read".into(),
+                tool_input: json!({
+                    "path": "/tmp/project/src/main.rs",
+                    "file_path": "/tmp/project/src/main.rs"
+                }),
+                tool_response: json!({"content": "fn main() {}"}),
+            }
+        );
     }
 
     #[test]

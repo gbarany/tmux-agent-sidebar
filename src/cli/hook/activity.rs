@@ -54,7 +54,7 @@ pub(super) fn handle_activity_log(
     }
 
     let current_status = tmux::get_pane_option_value(pane, tmux::PANE_STATUS);
-    let settled_parent_with_children = current_status == "background"
+    let settled_parent_with_children = matches!(current_status.as_str(), "background" | "error")
         && tmux::get_pane_option_value(pane, tmux::PANE_TURN_ACTIVE).is_empty()
         && !tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS).is_empty();
     if current_status != "running" && !current_status.is_empty() && !settled_parent_with_children {
@@ -368,6 +368,38 @@ mod tests {
             tmux::test_mock::get(pane, tmux::PANE_STARTED_AT).as_deref(),
             Some("1700")
         );
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("|Read|child.rs"));
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn handle_activity_log_preserves_settled_failure_for_child_tool() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_FAILED_PARENT_CHILD_ACTIVITY";
+        let path = crate::activity::log_file_path(pane);
+        let _ = fs::remove_file(&path);
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "error");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_WAIT_REASON, "rate_limit");
+
+        handle_activity_log(
+            pane,
+            "Read",
+            &json!({"file_path": "/home/user/src/child.rs"}),
+            &Value::Null,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("error"),
+            "child activity must not revive a parent turn that failed"
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_WAIT_REASON).as_deref(),
+            Some("rate_limit")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
         let content = fs::read_to_string(&path).unwrap();
         assert!(content.contains("|Read|child.rs"));
         fs::remove_file(&path).ok();

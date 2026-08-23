@@ -150,7 +150,8 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             agent_id,
         } => handlers::on_subagent_start(pane, &agent_type, agent_id.as_deref()),
         AgentEvent::SubagentStop { agent_id, .. } => {
-            handlers::on_subagent_stop(pane, agent_id.as_deref())
+            let notifications = notification_settings();
+            handlers::on_subagent_stop(pane, agent_id.as_deref(), &notifications)
         }
         AgentEvent::ActivityLog {
             tool_name,

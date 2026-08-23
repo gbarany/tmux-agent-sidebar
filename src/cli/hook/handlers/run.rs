@@ -9,9 +9,8 @@ use super::super::context::{
     AgentContext, clear_run_state, is_system_message, mark_task_reset, set_agent_meta,
 };
 use super::super::notifications::{
-    NotifyLabels, NotifyPayload, notification_run_id, notify_lifecycle, set_notification_run_id,
-    stop_body, stop_failure_body, stop_failure_fingerprint, task_completed_body,
-    task_completed_fingerprint,
+    NotifyLabels, NotifyPayload, notify_lifecycle, notify_stop, set_notification_run_id, stop_body,
+    stop_failure_body, stop_failure_fingerprint, task_completed_body, task_completed_fingerprint,
 };
 use super::status_priority::resolve_stop_status;
 
@@ -33,6 +32,7 @@ pub(in crate::cli::hook) fn on_user_prompt_submit(
     tmux::set_pane_option(pane, tmux::PANE_STARTED_AT, &now_epoch_secs().to_string());
     tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
     tmux::set_pane_option(pane, tmux::PANE_TURN_ACTIVE, "1");
+    tmux::unset_pane_option(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY);
     if let Some(prompt_id) = prompt_id {
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_ID, &encode_prompt_id(prompt_id));
     } else {
@@ -73,7 +73,23 @@ fn mark_turn_settled(pane: &str, prompt_id: Option<&str>) {
     tmux::unset_pane_option(pane, tmux::PANE_TURN_ACTIVE);
 }
 
-fn settle_turn_state(pane: &str, ctx: &AgentContext<'_>, prompt_id: Option<&str>) -> bool {
+#[derive(Clone, Copy)]
+struct BackgroundWork {
+    shell_live: bool,
+    subagent_live: bool,
+}
+
+impl BackgroundWork {
+    fn any(self) -> bool {
+        self.shell_live || self.subagent_live
+    }
+}
+
+fn settle_turn_state(
+    pane: &str,
+    ctx: &AgentContext<'_>,
+    prompt_id: Option<&str>,
+) -> BackgroundWork {
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
 
@@ -86,7 +102,11 @@ fn settle_turn_state(pane: &str, ctx: &AgentContext<'_>, prompt_id: Option<&str>
 
     let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
     let subagent_live = !tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS).is_empty();
-    let background_live = bg_shell_live || subagent_live;
+    let background = BackgroundWork {
+        shell_live: bg_shell_live,
+        subagent_live,
+    };
+    let background_live = background.any();
     if background_live {
         tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
     } else {
@@ -95,7 +115,7 @@ fn settle_turn_state(pane: &str, ctx: &AgentContext<'_>, prompt_id: Option<&str>
     mark_task_reset(pane);
     set_status(pane, resolve_stop_status(background_live));
     mark_turn_settled(pane, prompt_id);
-    background_live
+    background
 }
 
 pub(in crate::cli::hook) fn on_stop(
@@ -117,33 +137,29 @@ pub(in crate::cli::hook) fn on_stop(
         tmux::set_pane_option(pane, tmux::PANE_PROMPT, &msg);
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "response");
     }
-    let background_live = settle_turn_state(pane, ctx, prompt_id);
+    let background = settle_turn_state(pane, ctx, prompt_id);
+    let notification_body = stop_body(last_message);
 
-    if !background_live {
-        let run_id = notification_run_id(pane);
-        // Skip the generic Stop notification if an explicit TaskCompleted
-        // stamp from the current run has already fired — otherwise Claude
-        // Code's `TaskCompleted` → `Stop` sequence produces two desktop
-        // notifications for the same logical completion.
-        let already_notified = desktop_notification::has_run_scoped_stamp(
+    if background.subagent_live
+        && notifications.enabled
+        && notifications.event_enabled(desktop_notification::DesktopNotificationEvent::Stop)
+    {
+        tmux::set_pane_option(
             pane,
-            DesktopNotificationKind::TaskCompleted,
-            run_id,
+            tmux::PANE_PENDING_STOP_NOTIFICATION_BODY,
+            &sanitize_tmux_value(&notification_body),
         );
-        if !already_notified {
-            let _ = notify_lifecycle(
-                pane,
-                NotifyLabels::FromCtx(ctx),
-                notifications,
-                run_id,
-                NotifyPayload {
-                    kind: DesktopNotificationKind::TaskCompleted,
-                    event: desktop_notification::DesktopNotificationEvent::Stop,
-                    fingerprint_suffix: "stop",
-                    body: &stop_body(last_message),
-                },
-            );
-        }
+    } else {
+        tmux::unset_pane_option(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY);
+    }
+
+    if !background.any() {
+        let _ = notify_stop(
+            pane,
+            NotifyLabels::FromCtx(ctx),
+            notifications,
+            &notification_body,
+        );
     }
     if let Some(resp) = response {
         println!("{resp}");
@@ -330,6 +346,10 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("background")
+        );
+        assert!(
+            !tmux::test_mock::contains(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY),
+            "shell-only background work must not queue a completion notification"
         );
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STARTED_AT).as_deref(),
@@ -541,6 +561,48 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("background")
+        );
+        assert!(
+            !tmux::test_mock::contains(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY),
+            "non-notifying TurnSettled events must not queue a completion notification"
+        );
+    }
+
+    #[test]
+    fn stop_with_grok_subagent_defers_completion_notification() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_DEFERRED_STOP_NOTIFICATION";
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "explore:sub-1");
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: true,
+            events: [desktop_notification::DesktopNotificationEvent::Stop]
+                .into_iter()
+                .collect(),
+        };
+
+        on_stop(
+            pane,
+            &ctx,
+            "background child still working",
+            None,
+            None,
+            &notifications,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY).as_deref(),
+            Some("background child still working")
+        );
+        assert!(
+            !tmux::test_mock::contains(pane, tmux::PANE_OS_NOTIFY_TASK_COMPLETED),
+            "parent Stop must not notify before the final child exits"
         );
     }
 

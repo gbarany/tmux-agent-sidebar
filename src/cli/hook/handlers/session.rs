@@ -25,6 +25,7 @@ pub(in crate::cli::hook) fn on_session_start(
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT_ID);
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT_SOURCE);
     tmux::unset_pane_option(pane, tmux::PANE_TURN_ACTIVE);
+    tmux::unset_pane_option(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY);
     // `@pane_subagents` is deliberately preserved across SessionStart.
     // Subagents share the parent's `$TMUX_PANE`, so when a subagent
     // fires its own SessionStart after SubagentStart has populated the

@@ -40,6 +40,9 @@ pub const PANE_OS_NOTIFY_PERMISSION_REQUIRED: &str = "@pane_os_notify_permission
 pub const PANE_OS_NOTIFY_TASK_COMPLETED: &str = "@pane_os_notify_task_completed";
 /// Same dedup stamp for `TaskFailed` notifications.
 pub const PANE_OS_NOTIFY_TASK_FAILED: &str = "@pane_os_notify_task_failed";
+/// Completion body queued by a parent `Stop` while background subagents
+/// remain live. The final `SubagentStop` consumes it once no shell is live.
+pub const PANE_PENDING_STOP_NOTIFICATION_BODY: &str = "@pane_pending_stop_notification_body";
 /// Legacy marker — see
 /// `cli/hook/context/pending.rs::PENDING_SESSION_END` for the
 /// rationale for keeping it defined but never set.

@@ -96,10 +96,10 @@ fn settle_turn_state(
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
 
-    // Claude Task subagents are synchronous, so leftovers at parent Stop are
-    // stale. Grok background subagents can outlive the parent turn and must
-    // remain visible until their own SubagentStop arrives.
-    if ctx.agent == tmux::CLAUDE_AGENT {
+    // Only Grok background subagents can outlive the parent turn. Claude Task
+    // children are synchronous, while Codex and OpenCode do not emit a later
+    // SubagentStop that could drain a stale list.
+    if ctx.agent != tmux::GROK_AGENT {
         tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
     }
 
@@ -394,42 +394,48 @@ mod tests {
     }
 
     #[test]
-    fn on_stop_clears_stale_subagents() {
+    fn on_stop_clears_stale_subagents_for_non_grok_agents() {
         let _guard = tmux::test_mock::install();
-        let pane = "%STOP_STALE_SUBAGENTS";
-        tmux::test_mock::set(
-            pane,
-            tmux::PANE_SUBAGENTS,
-            "general-purpose:sub-1,general-purpose:sub-2",
-        );
-        let ctx = AgentContext {
-            agent: "claude",
-            cwd: "/repo",
-            permission_mode: "default",
-            worktree: &None,
-            session_id: &None,
-        };
+        for (agent, pane) in [
+            (tmux::CLAUDE_AGENT, "%STOP_STALE_CLAUDE"),
+            (tmux::CODEX_AGENT, "%STOP_STALE_CODEX"),
+            (tmux::OPENCODE_AGENT, "%STOP_STALE_OPENCODE"),
+        ] {
+            tmux::test_mock::set(
+                pane,
+                tmux::PANE_SUBAGENTS,
+                "general-purpose:sub-1,general-purpose:sub-2",
+            );
+            let ctx = AgentContext {
+                agent,
+                cwd: "/repo",
+                permission_mode: "default",
+                worktree: &None,
+                session_id: &None,
+            };
 
-        on_stop(
-            pane,
-            &ctx,
-            "",
-            None,
-            None,
-            &desktop_notification::DesktopNotificationSettings {
-                enabled: false,
-                events: Default::default(),
-            },
-        );
+            on_stop(
+                pane,
+                &ctx,
+                "",
+                None,
+                None,
+                &desktop_notification::DesktopNotificationSettings {
+                    enabled: false,
+                    events: Default::default(),
+                },
+            );
 
-        assert!(
-            !tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS),
-            "parent Stop must clear stale subagent list"
-        );
-        assert_eq!(
-            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
-            Some("idle")
-        );
+            assert!(
+                !tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS),
+                "{agent} Stop must clear stale subagent list"
+            );
+            assert_eq!(
+                tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+                Some("idle"),
+                "{agent} Stop must not remain in background"
+            );
+        }
     }
 
     #[test]

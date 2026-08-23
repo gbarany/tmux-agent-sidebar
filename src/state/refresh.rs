@@ -100,7 +100,9 @@ impl AppState {
             tmux::PANE_PROMPT_SOURCE,
             tmux::PANE_TURN_ACTIVE,
             tmux::PANE_SUBAGENTS,
+            tmux::PANE_PENDING_SESSION_END,
             tmux::PANE_PENDING_STOP_NOTIFICATION_BODY,
+            tmux::PANE_PENDING_WORKTREE_REMOVE,
             tmux::PANE_CWD,
             tmux::PANE_PERMISSION_MODE,
             tmux::PANE_WORKTREE_NAME,
@@ -841,16 +843,26 @@ mod tests {
     }
 
     #[test]
-    fn clear_dead_agent_metadata_clears_turn_correlation_options() {
+    fn clear_dead_agent_metadata_clears_internal_lifecycle_options() {
         let _guard = tmux::test_mock::install();
         let pane = "%DEAD_GROK_CORRELATION";
         tmux::test_mock::set(pane, tmux::PANE_PROMPT_ID, "70726f6d70742d31");
         tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+        tmux::test_mock::set(pane, tmux::PANE_PENDING_SESSION_END, "logout");
+        tmux::test_mock::set(pane, tmux::PANE_PENDING_WORKTREE_REMOVE, "/repo/wt");
 
         AppState::clear_dead_agent_metadata(pane);
 
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT_ID));
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
+        assert!(!tmux::test_mock::contains(
+            pane,
+            tmux::PANE_PENDING_SESSION_END
+        ));
+        assert!(!tmux::test_mock::contains(
+            pane,
+            tmux::PANE_PENDING_WORKTREE_REMOVE
+        ));
     }
 
     #[test]

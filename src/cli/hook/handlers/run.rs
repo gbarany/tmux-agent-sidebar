@@ -56,10 +56,10 @@ fn turn_end_is_current(pane: &str, prompt_id: Option<&str>) -> bool {
         return true;
     };
     let current = tmux::get_pane_option_value(pane, tmux::PANE_PROMPT_ID);
-    if current.is_empty() {
-        return true;
-    }
     let active = !tmux::get_pane_option_value(pane, tmux::PANE_TURN_ACTIVE).is_empty();
+    if current.is_empty() {
+        return !active;
+    }
     active && current == encode_prompt_id(prompt_id)
 }
 
@@ -738,6 +738,46 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_PROMPT).as_deref(),
             Some("success")
+        );
+    }
+
+    #[test]
+    fn identified_end_does_not_settle_active_idless_turn() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%ACTIVE_IDLESS_TURN";
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &None,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+
+        on_user_prompt_submit(pane, &ctx, "current idless turn", None);
+        on_stop(
+            pane,
+            &ctx,
+            "stale identified response",
+            None,
+            Some("prompt-old"),
+            &notifications,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("running")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT).as_deref(),
+            Some("current idless turn")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_TURN_ACTIVE).as_deref(),
+            Some("1")
         );
     }
 }

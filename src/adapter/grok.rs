@@ -92,7 +92,7 @@ fn optional_str(input: &Value, keys: &[&str]) -> Option<String> {
 }
 
 fn is_subagent_event(input: &Value) -> bool {
-    !json_str(input, &["subagentType", "subagent_type"]).is_empty()
+    !json_str(input, &["subagentType", "subagent_type", "agent_type"]).is_empty()
 }
 
 fn value_or_null(input: &Value, keys: &[&str]) -> Value {
@@ -373,6 +373,25 @@ mod tests {
                 )
                 .is_none()
         );
+    }
+
+    #[test]
+    fn agent_type_alias_marks_parent_only_events_as_child() {
+        for event_name in [
+            "session-start",
+            "session-end",
+            "user-prompt-submit",
+            "stop",
+            "turn-settled",
+            "stop-failure",
+        ] {
+            assert!(
+                GrokAdapter
+                    .parse(event_name, &json!({"agent_type": "explore"}))
+                    .is_none(),
+                "{event_name} from an agent_type child must be ignored"
+            );
+        }
     }
 
     #[test]

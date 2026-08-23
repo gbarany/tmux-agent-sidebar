@@ -1,4 +1,4 @@
-use crate::cli::set_status;
+use crate::cli::{set_attention, set_status};
 use crate::desktop_notification;
 use crate::tmux;
 
@@ -59,16 +59,22 @@ pub(in crate::cli::hook) fn on_subagent_stop(
 
         let status = tmux::get_pane_option_value(pane, tmux::PANE_STATUS);
         let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
-        if parent_turn_settled && !bg_shell_live && !status.is_empty() && status != "error" {
-            clear_run_state(pane);
-            set_status(pane, "idle");
-            if !deferred_body.is_empty() {
-                let _ = notify_stop(
-                    pane,
-                    NotifyLabels::FromPane { agent: &agent },
-                    notifications,
-                    &deferred_body,
-                );
+        if parent_turn_settled && !status.is_empty() && status != "error" {
+            set_attention(pane, "clear");
+            if bg_shell_live {
+                tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
+                set_status(pane, "background");
+            } else {
+                clear_run_state(pane);
+                set_status(pane, "idle");
+                if !deferred_body.is_empty() {
+                    let _ = notify_stop(
+                        pane,
+                        NotifyLabels::FromPane { agent: &agent },
+                        notifications,
+                        &deferred_body,
+                    );
+                }
             }
         }
     }
@@ -164,6 +170,7 @@ mod tests {
             tmux::test_mock::set(&pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
             tmux::test_mock::set(&pane, tmux::PANE_STATUS, status);
             tmux::test_mock::set(&pane, tmux::PANE_STARTED_AT, "1700");
+            tmux::test_mock::set(&pane, tmux::PANE_ATTENTION, "notification");
             tmux::test_mock::set(
                 &pane,
                 tmux::PANE_PENDING_STOP_NOTIFICATION_BODY,
@@ -182,6 +189,7 @@ mod tests {
                 &pane,
                 tmux::PANE_PENDING_STOP_NOTIFICATION_BODY
             ));
+            assert!(!tmux::test_mock::contains(&pane, tmux::PANE_ATTENTION));
         }
     }
 
@@ -213,6 +221,35 @@ mod tests {
             !tmux::test_mock::contains(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY),
             "shell-backed background work keeps the existing no-notification behavior"
         );
+    }
+
+    #[test]
+    fn last_subagent_stop_restores_background_after_child_transition_with_live_shell() {
+        let _guard = tmux::test_mock::install();
+
+        for status in ["waiting", "running"] {
+            let pane = format!("%SUB_LAST_SHELL_{}", status.to_uppercase());
+            tmux::test_mock::set(&pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+            tmux::test_mock::set(&pane, tmux::PANE_BG_CMD, "sleep 300");
+            tmux::test_mock::set(&pane, tmux::PANE_STATUS, status);
+            tmux::test_mock::set(&pane, tmux::PANE_STARTED_AT, "1700");
+            tmux::test_mock::set(&pane, tmux::PANE_WAIT_REASON, "permission");
+            tmux::test_mock::set(&pane, tmux::PANE_ATTENTION, "notification");
+
+            on_subagent_stop(&pane, Some("sub-1"), &default_notifications());
+
+            assert_eq!(
+                tmux::test_mock::get(&pane, tmux::PANE_STATUS).as_deref(),
+                Some("background"),
+                "a settled parent with a live shell must return to background from {status}"
+            );
+            assert_eq!(
+                tmux::test_mock::get(&pane, tmux::PANE_STARTED_AT).as_deref(),
+                Some("1700")
+            );
+            assert!(!tmux::test_mock::contains(&pane, tmux::PANE_WAIT_REASON));
+            assert!(!tmux::test_mock::contains(&pane, tmux::PANE_ATTENTION));
+        }
     }
 
     #[test]

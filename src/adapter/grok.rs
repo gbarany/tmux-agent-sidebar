@@ -144,7 +144,7 @@ fn copy_key(map: &mut Map<String, Value>, source: &str, destination: &str) {
 impl EventAdapter for GrokAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent> {
         match event_name {
-            "session-start" => Some(AgentEvent::SessionStart {
+            "session-start" if !is_subagent_event(input) => Some(AgentEvent::SessionStart {
                 agent: GROK_AGENT.into(),
                 cwd: json_str(input, &["cwd"]).into(),
                 permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
@@ -354,6 +354,22 @@ mod tests {
                 .parse(
                     "session-end",
                     &json!({"reason": "shutdown", "subagentType": "explore"})
+                )
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn child_session_start_does_not_reset_host_session() {
+        assert!(
+            GrokAdapter
+                .parse(
+                    "session-start",
+                    &json!({
+                        "cwd": "/repo",
+                        "permissionMode": "auto",
+                        "subagentType": "explore"
+                    })
                 )
                 .is_none()
         );

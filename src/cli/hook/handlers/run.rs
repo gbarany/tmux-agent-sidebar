@@ -59,10 +59,13 @@ fn turn_end_is_current(pane: &str, prompt_id: Option<&str>) -> bool {
         return true;
     };
     let current = tmux::get_pane_option_value(pane, tmux::PANE_PROMPT_ID);
-    let active = !tmux::get_pane_option_value(pane, tmux::PANE_TURN_ACTIVE).is_empty();
+    // Identified terminal events are valid only when a matching submit
+    // identity is still tracked. SessionStart clears that identity, so a
+    // delayed terminal event from the previous session must be rejected.
     if current.is_empty() {
-        return !active;
+        return false;
     }
+    let active = !tmux::get_pane_option_value(pane, tmux::PANE_TURN_ACTIVE).is_empty();
     active && current == encode_prompt_id(prompt_id)
 }
 
@@ -236,6 +239,7 @@ pub(in crate::cli::hook) fn on_task_completed(
 
 #[cfg(test)]
 mod tests {
+    use super::super::session::on_session_start;
     use super::*;
 
     #[test]
@@ -843,6 +847,109 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_TURN_ACTIVE).as_deref(),
             Some("1")
+        );
+    }
+
+    #[test]
+    fn identified_stop_does_not_mutate_reset_session_before_first_prompt() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_RESET_STALE_STOP";
+        let old_session_id = Some("session-old".into());
+        let old_ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo/old",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &old_session_id,
+        };
+        let new_session_id = Some("session-new".into());
+        let new_ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo/new",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &new_session_id,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+
+        on_user_prompt_submit(pane, &old_ctx, "old prompt", Some("prompt-old"));
+        on_session_start(pane, &new_ctx, "clear");
+        on_stop(
+            pane,
+            &old_ctx,
+            "old response",
+            None,
+            Some("prompt-old"),
+            &notifications,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT_ID));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_CWD).as_deref(),
+            Some("/repo/new")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SESSION_ID).as_deref(),
+            Some("session-new")
+        );
+    }
+
+    #[test]
+    fn identified_failure_does_not_mutate_reset_session_before_first_prompt() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_RESET_STALE_FAILURE";
+        let old_session_id = Some("session-old".into());
+        let old_ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo/old",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &old_session_id,
+        };
+        let new_session_id = Some("session-new".into());
+        let new_ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo/new",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &new_session_id,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+
+        on_user_prompt_submit(pane, &old_ctx, "old prompt", Some("prompt-old"));
+        on_session_start(pane, &new_ctx, "clear");
+        on_stop_failure(
+            pane,
+            &old_ctx,
+            "old failure",
+            Some("prompt-old"),
+            &notifications,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT_ID));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_CWD).as_deref(),
+            Some("/repo/new")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SESSION_ID).as_deref(),
+            Some("session-new")
         );
     }
 

@@ -38,7 +38,8 @@ Pane options written to tmux:
 | `@pane_cwd` | SessionStart, CwdChanged | Working directory |
 | `@pane_permission_mode` | SessionStart, hook event | Permission mode |
 | `@pane_prompt` | UserPromptSubmit, Stop | Latest prompt or response text |
-| `@pane_prompt_id` | UserPromptSubmit, Stop, TurnSettled, StopFailure | Losslessly encoded opaque turn ID when exposed; stale turn-end hooks are ignored |
+| `@pane_prompt_id` | UserPromptSubmit, Stop, TurnSettled, StopFailure | Losslessly encoded latest turn ID when exposed; retained after settlement so stale and duplicate turn-end hooks are ignored |
+| `@pane_turn_active` | UserPromptSubmit, Stop, TurnSettled, StopFailure | Parent-turn activity marker; keeps child tool events from reviving a settled background pane |
 | `@pane_prompt_source` | UserPromptSubmit, Stop | "user" or "response" |
 | `@pane_started_at` | UserPromptSubmit | Unix epoch when agent started |
 | `@pane_attention` | SessionStart, Stop, TurnSettled, StopFailure (clear); Notification, PermissionDenied, TeammateIdle (set) | "notification" or "clear" |

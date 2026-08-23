@@ -8,7 +8,8 @@ use super::options::{
     PANE_AGENT, PANE_ATTENTION, PANE_BG_CMD, PANE_CWD, PANE_NAME, PANE_PENDING_SESSION_END,
     PANE_PENDING_WORKTREE_REMOVE, PANE_PERMISSION_MODE, PANE_PROMPT, PANE_PROMPT_ID,
     PANE_PROMPT_SOURCE, PANE_ROLE, PANE_SESSION_ID, PANE_STARTED_AT, PANE_STATUS, PANE_SUBAGENTS,
-    PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME, unset_pane_option,
+    PANE_TURN_ACTIVE, PANE_WAIT_REASON, PANE_WORKTREE_BRANCH, PANE_WORKTREE_NAME,
+    unset_pane_option,
 };
 use super::types::{
     AgentType, CODEX_AGENT, PaneInfo, PaneStatus, PermissionMode, SessionInfo, WindowInfo,
@@ -367,6 +368,7 @@ fn clear_agent_pane_state(pane_id: &str) {
         PANE_PROMPT,
         PANE_PROMPT_ID,
         PANE_PROMPT_SOURCE,
+        PANE_TURN_ACTIVE,
         PANE_BG_CMD,
         PANE_SUBAGENTS,
         PANE_CWD,
@@ -1113,6 +1115,7 @@ mod tests {
         test_mock::set(pane, PANE_AGENT, "grok");
         test_mock::set(pane, PANE_PROMPT, "previous prompt");
         test_mock::set(pane, PANE_PROMPT_ID, "prompt-old");
+        test_mock::set(pane, PANE_TURN_ACTIVE, "1");
         test_mock::set(pane, PANE_STATUS, "running");
 
         let mut fields = full_fields();
@@ -1122,7 +1125,13 @@ mod tests {
         let line = make_pane_line(&fields);
 
         assert!(parse_pane_line(&line).is_none());
-        for key in [PANE_AGENT, PANE_PROMPT, PANE_PROMPT_ID, PANE_STATUS] {
+        for key in [
+            PANE_AGENT,
+            PANE_PROMPT,
+            PANE_PROMPT_ID,
+            PANE_TURN_ACTIVE,
+            PANE_STATUS,
+        ] {
             assert!(
                 !test_mock::contains(pane, key),
                 "{key} must be cleared when a Grok pane falls back to shell"

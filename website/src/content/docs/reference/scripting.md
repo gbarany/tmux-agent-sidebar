@@ -27,7 +27,8 @@ tmux show -t "$pane_id" -pv @pane_agent
 | `@pane_name`               | Friendly agent/session name (from `/rename` on Claude)              |
 | `@pane_role`               | `sidebar` for the sidebar pane itself; empty for agent panes        |
 | `@pane_prompt`             | Latest user prompt text or response preview                         |
-| `@pane_prompt_id`          | Current turn ID when exposed; used to ignore stale completion hooks |
+| `@pane_prompt_id`          | Latest turn ID when exposed; retained after settlement to ignore stale or duplicate completion hooks |
+| `@pane_turn_active`        | `1` while the parent turn is active; empty after it settles          |
 | `@pane_prompt_source`      | `user` when the prompt field holds the user's prompt, `response` when it holds the agent's last reply |
 | `@pane_started_at`         | Epoch seconds of the last `UserPromptSubmit`                        |
 | `@pane_wait_reason`        | Wait-reason text (populated only when waiting)                      |

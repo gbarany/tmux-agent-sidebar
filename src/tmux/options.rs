@@ -54,8 +54,12 @@ pub const PANE_PERMISSION_MODE: &str = "@pane_permission_mode";
 /// as activity context.
 pub const PANE_PROMPT: &str = "@pane_prompt";
 /// Opaque current-turn identifier reported by agents whose end events may
-/// arrive out of order. Used to reject stale lifecycle reports.
+/// arrive out of order. Retained after settlement to reject stale or duplicate
+/// lifecycle reports until the next user prompt starts.
 pub const PANE_PROMPT_ID: &str = "@pane_prompt_id";
+/// Marker showing that the pane's parent turn is still active. Child tool
+/// events must not revive a background pane after this marker is cleared.
+pub const PANE_TURN_ACTIVE: &str = "@pane_turn_active";
 /// Where the prompt came from (e.g. `UserPromptSubmit` vs
 /// resumed session) — drives rendering nuance.
 pub const PANE_PROMPT_SOURCE: &str = "@pane_prompt_source";

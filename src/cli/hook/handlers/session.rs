@@ -24,6 +24,7 @@ pub(in crate::cli::hook) fn on_session_start(
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT);
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT_ID);
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT_SOURCE);
+    tmux::unset_pane_option(pane, tmux::PANE_TURN_ACTIVE);
     // `@pane_subagents` is deliberately preserved across SessionStart.
     // Subagents share the parent's `$TMUX_PANE`, so when a subagent
     // fires its own SessionStart after SubagentStart has populated the
@@ -178,6 +179,7 @@ mod tests {
     fn on_session_start_sets_agent_and_idle_status() {
         let _guard = tmux::test_mock::install();
         let pane = "%NEW_SESSION";
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
         let ctx = AgentContext {
             agent: "claude",
             cwd: "/repo",
@@ -204,6 +206,7 @@ mod tests {
             !tmux::test_mock::contains(pane, tmux::PANE_PROMPT),
             "SessionStart should clear any stale prompt"
         );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
     }
 
     #[test]

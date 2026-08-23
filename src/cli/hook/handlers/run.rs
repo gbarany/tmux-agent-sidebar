@@ -32,6 +32,7 @@ pub(in crate::cli::hook) fn on_user_prompt_submit(
     }
     tmux::set_pane_option(pane, tmux::PANE_STARTED_AT, &now_epoch_secs().to_string());
     tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
+    tmux::set_pane_option(pane, tmux::PANE_TURN_ACTIVE, "1");
     if let Some(prompt_id) = prompt_id {
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_ID, &encode_prompt_id(prompt_id));
     } else {
@@ -55,10 +56,21 @@ fn turn_end_is_current(pane: &str, prompt_id: Option<&str>) -> bool {
         return true;
     };
     let current = tmux::get_pane_option_value(pane, tmux::PANE_PROMPT_ID);
-    current.is_empty() || current == encode_prompt_id(prompt_id)
+    if current.is_empty() {
+        return true;
+    }
+    let active = !tmux::get_pane_option_value(pane, tmux::PANE_TURN_ACTIVE).is_empty();
+    active && current == encode_prompt_id(prompt_id)
 }
 
-fn settle_turn_state(pane: &str, ctx: &AgentContext<'_>) -> bool {
+fn mark_turn_settled(pane: &str, prompt_id: Option<&str>) {
+    if let Some(prompt_id) = prompt_id {
+        tmux::set_pane_option(pane, tmux::PANE_PROMPT_ID, &encode_prompt_id(prompt_id));
+    }
+    tmux::unset_pane_option(pane, tmux::PANE_TURN_ACTIVE);
+}
+
+fn settle_turn_state(pane: &str, ctx: &AgentContext<'_>, prompt_id: Option<&str>) -> bool {
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
 
@@ -79,7 +91,7 @@ fn settle_turn_state(pane: &str, ctx: &AgentContext<'_>) -> bool {
     }
     mark_task_reset(pane);
     set_status(pane, resolve_stop_status(background_live));
-    tmux::unset_pane_option(pane, tmux::PANE_PROMPT_ID);
+    mark_turn_settled(pane, prompt_id);
     background_live
 }
 
@@ -102,7 +114,7 @@ pub(in crate::cli::hook) fn on_stop(
         tmux::set_pane_option(pane, tmux::PANE_PROMPT, &msg);
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "response");
     }
-    let background_live = settle_turn_state(pane, ctx);
+    let background_live = settle_turn_state(pane, ctx, prompt_id);
 
     if !background_live {
         let run_id = notification_run_id(pane);
@@ -142,7 +154,7 @@ pub(in crate::cli::hook) fn on_turn_settled(
     prompt_id: Option<&str>,
 ) -> i32 {
     if turn_end_is_current(pane, prompt_id) {
-        settle_turn_state(pane, ctx);
+        settle_turn_state(pane, ctx, prompt_id);
     }
     0
 }
@@ -165,7 +177,7 @@ pub(in crate::cli::hook) fn on_stop_failure(
         tmux::set_pane_option(pane, tmux::PANE_WAIT_REASON, error);
     }
     set_status(pane, "error");
-    tmux::unset_pane_option(pane, tmux::PANE_PROMPT_ID);
+    mark_turn_settled(pane, prompt_id);
     let _ = notify_lifecycle(
         pane,
         NotifyLabels::FromCtx(ctx),
@@ -443,6 +455,10 @@ mod tests {
             tmux::test_mock::get(pane, tmux::PANE_PROMPT_ID).as_deref(),
             Some(encode_prompt_id("prompt-new").as_str())
         );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_TURN_ACTIVE).as_deref(),
+            Some("1")
+        );
     }
 
     #[test]
@@ -493,7 +509,11 @@ mod tests {
             tmux::test_mock::get(pane, tmux::PANE_PROMPT_SOURCE).as_deref(),
             Some("user")
         );
-        assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT_ID));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT_ID).as_deref(),
+            Some(encode_prompt_id("prompt-1").as_str())
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
     }
 
     #[test]
@@ -563,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn matching_turn_end_settles_and_clears_prompt_id() {
+    fn matching_turn_end_settles_and_retains_prompt_identity() {
         let _guard = tmux::test_mock::install();
         let pane = "%GROK_MATCHING_STOP";
         tmux::test_mock::set(
@@ -572,6 +592,7 @@ mod tests {
             &encode_prompt_id("prompt-current"),
         );
         tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
         let ctx = AgentContext {
             agent: "grok",
             cwd: "/repo",
@@ -596,7 +617,11 @@ mod tests {
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("idle")
         );
-        assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT_ID));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT_ID).as_deref(),
+            Some(encode_prompt_id("prompt-current").as_str())
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
     }
 
     #[test]
@@ -631,6 +656,88 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_PROMPT_ID).as_deref(),
             Some(encode_prompt_id("prompt-new").as_str())
+        );
+    }
+
+    #[test]
+    fn stale_failure_does_not_replace_newer_settled_turn() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_STALE_AFTER_SETTLED";
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &None,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+
+        on_user_prompt_submit(pane, &ctx, "new turn", Some("prompt-new"));
+        on_stop(
+            pane,
+            &ctx,
+            "new response",
+            None,
+            Some("prompt-new"),
+            &notifications,
+        );
+        on_stop_failure(
+            pane,
+            &ctx,
+            "old failure",
+            Some("prompt-old"),
+            &notifications,
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT).as_deref(),
+            Some("new response")
+        );
+    }
+
+    #[test]
+    fn duplicate_failure_does_not_replace_successful_stop() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_DUPLICATE_AFTER_STOP";
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &None,
+        };
+        let notifications = desktop_notification::DesktopNotificationSettings {
+            enabled: false,
+            events: Default::default(),
+        };
+
+        on_user_prompt_submit(pane, &ctx, "turn", Some("prompt-1"));
+        on_stop(
+            pane,
+            &ctx,
+            "success",
+            None,
+            Some("prompt-1"),
+            &notifications,
+        );
+        on_stop_failure(pane, &ctx, "late failure", Some("prompt-1"), &notifications);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT).as_deref(),
+            Some("success")
         );
     }
 }

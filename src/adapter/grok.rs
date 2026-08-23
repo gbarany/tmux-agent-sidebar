@@ -150,6 +150,7 @@ impl EventAdapter for GrokAdapter {
                 cwd: json_str(input, &["cwd"]).into(),
                 permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
                 source: json_str(input, &["source"]).into(),
+                top_level: true,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, &["sessionId", "session_id"]),

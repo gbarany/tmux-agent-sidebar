@@ -882,7 +882,7 @@ mod tests {
         };
 
         on_user_prompt_submit(pane, &old_ctx, "old prompt", Some("prompt-old"));
-        on_session_start(pane, &new_ctx, "clear");
+        on_session_start(pane, &new_ctx, "clear", true);
         on_stop(
             pane,
             &old_ctx,
@@ -934,7 +934,7 @@ mod tests {
         };
 
         on_user_prompt_submit(pane, &old_ctx, "old prompt", Some("prompt-old"));
-        on_session_start(pane, &new_ctx, "clear");
+        on_session_start(pane, &new_ctx, "clear", true);
         on_stop_failure(
             pane,
             &old_ctx,

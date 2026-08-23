@@ -25,6 +25,9 @@ pub enum AgentEvent {
         cwd: String,
         permission_mode: String,
         source: String,
+        /// Whether the adapter guarantees this belongs to the pane's host
+        /// session rather than a child sharing the same `$TMUX_PANE`.
+        top_level: bool,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
         session_id: Option<String>,
@@ -171,6 +174,7 @@ mod tests {
             cwd: "/tmp".into(),
             permission_mode: "default".into(),
             source: String::new(),
+            top_level: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -199,6 +203,7 @@ mod tests {
             cwd: "/tmp/wt".into(),
             permission_mode: "default".into(),
             source: String::new(),
+            top_level: false,
             worktree: Some(wt.clone()),
             agent_id: Some("abc-123".into()),
             session_id: None,

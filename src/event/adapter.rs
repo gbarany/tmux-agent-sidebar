@@ -71,6 +71,7 @@ mod tests {
                 cwd: "/tmp/project".into(),
                 permission_mode: "auto".into(),
                 source: "resume".into(),
+                top_level: true,
                 worktree: None,
                 agent_id: None,
                 session_id: Some("grok-session-1".into()),

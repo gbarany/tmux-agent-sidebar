@@ -96,7 +96,9 @@ impl AppState {
             tmux::PANE_STATUS,
             tmux::PANE_ATTENTION,
             tmux::PANE_PROMPT,
+            tmux::PANE_PROMPT_ID,
             tmux::PANE_PROMPT_SOURCE,
+            tmux::PANE_TURN_ACTIVE,
             tmux::PANE_SUBAGENTS,
             tmux::PANE_PENDING_STOP_NOTIFICATION_BODY,
             tmux::PANE_CWD,
@@ -836,6 +838,19 @@ mod tests {
         assert_eq!(filtered[0].windows.len(), 1);
         assert_eq!(filtered[0].windows[0].panes.len(), 1);
         assert_eq!(filtered[0].windows[0].panes[0].pane_id, "%2");
+    }
+
+    #[test]
+    fn clear_dead_agent_metadata_clears_turn_correlation_options() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%DEAD_GROK_CORRELATION";
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT_ID, "70726f6d70742d31");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+
+        AppState::clear_dead_agent_metadata(pane);
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT_ID));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
     }
 
     #[test]

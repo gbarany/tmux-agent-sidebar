@@ -5,9 +5,10 @@ use super::commands::run_tmux;
 // Single source of truth for every `@pane_*` tmux option the sidebar
 // writes or reads. Hooks, the TUI refresh path, and the query layer
 // all go through these constants so a typo can't silently corrupt
-// pane state. Keep `clear_agent_pane_state` in `tmux/query.rs` and
-// `clear_all_meta` in `cli/hook/context/meta.rs` in sync with this
-// list — both sweep the full set on teardown.
+// pane state. Keep `clear_agent_pane_state` in `tmux/query.rs`,
+// `clear_all_meta` in `cli/hook/context/meta.rs`, and
+// `clear_dead_agent_metadata` in `state/refresh.rs` in sync with this
+// list — all three sweep the full set on teardown.
 
 /// Agent name the hooks identified for the pane (`claude` / `codex` /
 /// `grok` / `opencode`). Drives the sidebar's per-row icon.

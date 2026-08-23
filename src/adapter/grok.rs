@@ -10,7 +10,8 @@ pub struct GrokAdapter;
 
 impl GrokAdapter {
     /// Grok Build lifecycle hooks used by the sidebar. Grok emits camelCase
-    /// payloads and supports Claude-compatible hook configuration.
+    /// payloads. Snake-case parser alternatives below are the official Grok
+    /// Agent SDK conversions of those fields, not Claude payload aliases.
     pub const HOOK_REGISTRATIONS: &'static [HookRegistration] = &[
         HookRegistration {
             trigger: "SessionStart",
@@ -92,7 +93,7 @@ fn optional_str(input: &Value, keys: &[&str]) -> Option<String> {
 }
 
 fn is_subagent_event(input: &Value) -> bool {
-    !json_str(input, &["subagentType", "subagent_type", "agent_type"]).is_empty()
+    !json_str(input, &["subagentType", "subagent_type"]).is_empty()
 }
 
 fn value_or_null(input: &Value, keys: &[&str]) -> Value {
@@ -154,7 +155,7 @@ impl EventAdapter for GrokAdapter {
                 session_id: optional_str(input, &["sessionId", "session_id"]),
             }),
             "session-end" if !is_subagent_event(input) => Some(AgentEvent::SessionEnd {
-                end_reason: json_str(input, &["reason", "endReason", "end_reason"]).into(),
+                end_reason: json_str(input, &["reason"]).into(),
             }),
             "user-prompt-submit" if !is_subagent_event(input) => {
                 Some(AgentEvent::UserPromptSubmit {
@@ -172,11 +173,7 @@ impl EventAdapter for GrokAdapter {
                 agent: GROK_AGENT.into(),
                 cwd: json_str(input, &["cwd"]).into(),
                 permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
-                wait_reason: json_str(
-                    input,
-                    &["notificationType", "notification_type", "wait_reason"],
-                )
-                .into(),
+                wait_reason: json_str(input, &["notificationType", "notification_type"]).into(),
                 meta_only: false,
                 worktree: None,
                 agent_id: None,
@@ -240,31 +237,25 @@ impl EventAdapter for GrokAdapter {
                 session_id: optional_str(input, &["sessionId", "session_id"]),
             }),
             "subagent-start" => {
-                let agent_type = json_str(input, &["subagentType", "subagent_type", "agent_type"]);
+                let agent_type = json_str(input, &["subagentType", "subagent_type"]);
                 if agent_type.is_empty() {
                     return None;
                 }
                 Some(AgentEvent::SubagentStart {
                     agent_type: agent_type.into(),
-                    agent_id: optional_str(
-                        input,
-                        &["subagentId", "subagent_id", "agentId", "agent_id"],
-                    )
-                    .or_else(|| Some(agent_type.to_string())),
+                    agent_id: optional_str(input, &["subagentId", "subagent_id"])
+                        .or_else(|| Some(agent_type.to_string())),
                 })
             }
             "subagent-stop" => {
-                let agent_type = json_str(input, &["subagentType", "subagent_type", "agent_type"]);
+                let agent_type = json_str(input, &["subagentType", "subagent_type"]);
                 if agent_type.is_empty() {
                     return None;
                 }
                 Some(AgentEvent::SubagentStop {
                     agent_type: agent_type.into(),
-                    agent_id: optional_str(
-                        input,
-                        &["subagentId", "subagent_id", "agentId", "agent_id"],
-                    )
-                    .or_else(|| Some(agent_type.to_string())),
+                    agent_id: optional_str(input, &["subagentId", "subagent_id"])
+                        .or_else(|| Some(agent_type.to_string())),
                     last_message: json_str(
                         input,
                         &["lastAssistantMessage", "last_assistant_message"],
@@ -286,10 +277,7 @@ impl EventAdapter for GrokAdapter {
                 Some(AgentEvent::ActivityLog {
                     tool_name,
                     tool_input,
-                    tool_response: value_or_null(
-                        input,
-                        &["toolResult", "tool_result", "tool_response"],
-                    ),
+                    tool_response: value_or_null(input, &["toolResult", "tool_result"]),
                 })
             }
             _ => None,
@@ -376,22 +364,25 @@ mod tests {
     }
 
     #[test]
-    fn agent_type_alias_marks_parent_only_events_as_child() {
-        for event_name in [
-            "session-start",
-            "session-end",
-            "user-prompt-submit",
-            "stop",
-            "turn-settled",
-            "stop-failure",
-        ] {
-            assert!(
-                GrokAdapter
-                    .parse(event_name, &json!({"agent_type": "explore"}))
-                    .is_none(),
-                "{event_name} from an agent_type child must be ignored"
-            );
-        }
+    fn agent_type_is_harness_metadata_not_subagent_identity() {
+        let event = GrokAdapter
+            .parse(
+                "session-start",
+                &json!({
+                    "agent_type": "grok-build",
+                    "cwd": "/repo",
+                    "session_id": "session-sdk"
+                }),
+            )
+            .expect("SDK agent_type must not suppress a top-level session");
+        assert!(matches!(event, AgentEvent::SessionStart { .. }));
+
+        assert!(
+            GrokAdapter
+                .parse("subagent-start", &json!({"agent_type": "explore"}))
+                .is_none(),
+            "Grok child identity is subagentType, not agent_type"
+        );
     }
 
     #[test]
@@ -553,33 +544,82 @@ mod tests {
     }
 
     #[test]
-    fn subagent_lifecycle_uses_documented_type_as_identity() {
+    fn subagent_lifecycle_uses_documented_type_and_id() {
         assert_eq!(
             GrokAdapter.parse(
                 "subagent-start",
-                &json!({"subagentType": "explore", "promptId": "child-turn-1"}),
+                &json!({
+                    "subagentId": "subagent-1",
+                    "subagentType": "explore",
+                    "promptId": "child-turn-1"
+                }),
             ),
             Some(AgentEvent::SubagentStart {
                 agent_type: "explore".into(),
-                agent_id: Some("explore".into()),
+                agent_id: Some("subagent-1".into()),
             })
         );
         assert_eq!(
             GrokAdapter.parse(
                 "subagent-stop",
                 &json!({
+                    "subagentId": "subagent-1",
                     "subagentType": "explore",
                     "promptId": "child-turn-1",
-                    "lastAssistantMessage": "found it"
+                    "lastAssistantMessage": "found it",
+                    "transcriptPath": "/tmp/subagent.jsonl"
                 }),
             ),
             Some(AgentEvent::SubagentStop {
                 agent_type: "explore".into(),
-                agent_id: Some("explore".into()),
+                agent_id: Some("subagent-1".into()),
                 last_message: "found it".into(),
-                transcript_path: "".into(),
+                transcript_path: "/tmp/subagent.jsonl".into(),
             })
         );
+    }
+
+    #[test]
+    fn claude_only_field_names_are_not_treated_as_grok_payloads() {
+        assert_eq!(
+            GrokAdapter.parse("session-end", &json!({"endReason": "shutdown"})),
+            Some(AgentEvent::SessionEnd {
+                end_reason: "".into(),
+            })
+        );
+
+        let notification = GrokAdapter
+            .parse("notification", &json!({"wait_reason": "permission_prompt"}))
+            .unwrap();
+        assert!(matches!(
+            notification,
+            AgentEvent::Notification { wait_reason, .. } if wait_reason.is_empty()
+        ));
+
+        assert_eq!(
+            GrokAdapter.parse(
+                "subagent-start",
+                &json!({"agentId": "claude-child", "subagentType": "explore"}),
+            ),
+            Some(AgentEvent::SubagentStart {
+                agent_type: "explore".into(),
+                agent_id: Some("explore".into()),
+            })
+        );
+
+        let activity = GrokAdapter
+            .parse(
+                "activity-log",
+                &json!({"toolName": "read_file", "tool_response": {"content": "x"}}),
+            )
+            .unwrap();
+        assert!(matches!(
+            activity,
+            AgentEvent::ActivityLog {
+                tool_response: Value::Null,
+                ..
+            }
+        ));
     }
 
     #[test]

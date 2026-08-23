@@ -24,7 +24,9 @@ pub(in crate::cli::hook) fn on_session_start(
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT);
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT_ID);
     tmux::unset_pane_option(pane, tmux::PANE_PROMPT_SOURCE);
-    tmux::unset_pane_option(pane, tmux::PANE_TURN_ACTIVE);
+    if pane_writes_allowed(pane) {
+        tmux::unset_pane_option(pane, tmux::PANE_TURN_ACTIVE);
+    }
     tmux::unset_pane_option(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY);
     // `@pane_subagents` is deliberately preserved across SessionStart.
     // Subagents share the parent's `$TMUX_PANE`, so when a subagent
@@ -220,6 +222,7 @@ mod tests {
         let _guard = tmux::test_mock::install();
         let pane = "%SUBAGENT_LIVE";
         tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
 
         on_session_start(pane, &basic_ctx(), "");
 
@@ -227,6 +230,11 @@ mod tests {
             tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
             Some("Explore:sub-1"),
             "SessionStart must not wipe an active subagent list"
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_TURN_ACTIVE).as_deref(),
+            Some("1"),
+            "child SessionStart must not clear the active parent turn"
         );
     }
 

@@ -47,6 +47,10 @@ pub(in crate::cli::hook) fn on_subagent_stop(
     // Once the last subagent stops, replay any teardown that was deferred
     // because subagents were active when SessionEnd / WorktreeRemove fired.
     if drained_to_empty {
+        // Child hooks can temporarily replace `background` with `waiting` or
+        // `running`; the turn marker is the durable parent-settlement signal.
+        let parent_turn_settled =
+            tmux::get_pane_option_value(pane, tmux::PANE_TURN_ACTIVE).is_empty();
         let deferred_body =
             tmux::get_pane_option_value(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY);
         let agent = tmux::get_pane_option_value(pane, tmux::PANE_AGENT);
@@ -55,7 +59,7 @@ pub(in crate::cli::hook) fn on_subagent_stop(
 
         let status = tmux::get_pane_option_value(pane, tmux::PANE_STATUS);
         let bg_shell_live = !tmux::get_pane_option_value(pane, tmux::PANE_BG_CMD).is_empty();
-        if status == "background" && !bg_shell_live {
+        if parent_turn_settled && !bg_shell_live && !status.is_empty() && status != "error" {
             clear_run_state(pane);
             set_status(pane, "idle");
             if !deferred_body.is_empty() {
@@ -152,6 +156,36 @@ mod tests {
     }
 
     #[test]
+    fn last_subagent_stop_settles_inactive_parent_after_child_state_transitions() {
+        let _guard = tmux::test_mock::install();
+
+        for status in ["waiting", "running"] {
+            let pane = format!("%SUB_LAST_{}", status.to_uppercase());
+            tmux::test_mock::set(&pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
+            tmux::test_mock::set(&pane, tmux::PANE_STATUS, status);
+            tmux::test_mock::set(&pane, tmux::PANE_STARTED_AT, "1700");
+            tmux::test_mock::set(
+                &pane,
+                tmux::PANE_PENDING_STOP_NOTIFICATION_BODY,
+                "parent response",
+            );
+
+            on_subagent_stop(&pane, Some("sub-1"), &default_notifications());
+
+            assert_eq!(
+                tmux::test_mock::get(&pane, tmux::PANE_STATUS).as_deref(),
+                Some("idle"),
+                "an inactive parent must settle after its final child stops from {status}"
+            );
+            assert!(!tmux::test_mock::contains(&pane, tmux::PANE_STARTED_AT));
+            assert!(!tmux::test_mock::contains(
+                &pane,
+                tmux::PANE_PENDING_STOP_NOTIFICATION_BODY
+            ));
+        }
+    }
+
+    #[test]
     fn last_subagent_stop_keeps_background_shell_running() {
         let _guard = tmux::test_mock::install();
         let pane = "%SUB_LAST_WITH_SHELL";
@@ -188,6 +222,7 @@ mod tests {
         tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
         tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
         tmux::test_mock::set(pane, tmux::PANE_STARTED_AT, "1700");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
 
         on_subagent_stop(pane, Some("sub-1"), &default_notifications());
 

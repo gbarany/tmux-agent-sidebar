@@ -53,6 +53,9 @@ fn encode_prompt_id(prompt_id: &str) -> String {
 
 fn turn_end_is_current(pane: &str, prompt_id: Option<&str>) -> bool {
     let Some(prompt_id) = prompt_id else {
+        // Grok's session-level idle_prompt backstop intentionally has no
+        // promptId and must settle unconditionally. Grok cancels its pending
+        // idle timer when a newer turn starts, so this is not a stale-turn path.
         return true;
     };
     let current = tmux::get_pane_option_value(pane, tmux::PANE_PROMPT_ID);
@@ -778,6 +781,32 @@ mod tests {
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_TURN_ACTIVE).as_deref(),
             Some("1")
+        );
+    }
+
+    #[test]
+    fn idless_session_backstop_settles_active_identified_turn() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_IDLE_BACKSTOP";
+        let ctx = AgentContext {
+            agent: "grok",
+            cwd: "/repo",
+            permission_mode: "auto",
+            worktree: &None,
+            session_id: &None,
+        };
+
+        on_user_prompt_submit(pane, &ctx, "turn missing its end report", Some("prompt-1"));
+        on_turn_settled(pane, &ctx, None);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT_ID).as_deref(),
+            Some(encode_prompt_id("prompt-1").as_str())
         );
     }
 }

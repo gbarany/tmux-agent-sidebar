@@ -17,6 +17,11 @@ pub(in crate::cli::hook) fn on_session_start(
     ctx: &AgentContext<'_>,
     source: &str,
 ) -> i32 {
+    // GrokAdapter filters child SessionStart events, so a Grok start reaching
+    // this handler is top-level and must not inherit a crashed child's state.
+    if ctx.agent == tmux::GROK_AGENT {
+        tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
+    }
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
     clear_run_state(pane);
@@ -236,6 +241,26 @@ mod tests {
             Some("1"),
             "child SessionStart must not clear the active parent turn"
         );
+    }
+
+    #[test]
+    fn top_level_grok_session_start_clears_stale_subagents() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_RESTART";
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "explore:stale-child");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+        let ctx = AgentContext {
+            agent: tmux::GROK_AGENT,
+            cwd: "/repo",
+            permission_mode: "default",
+            worktree: &None,
+            session_id: &None,
+        };
+
+        on_session_start(pane, &ctx, "startup");
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_TURN_ACTIVE));
     }
 
     #[test]

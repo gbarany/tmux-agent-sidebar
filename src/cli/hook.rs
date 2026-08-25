@@ -180,14 +180,25 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             )
         }
         AgentEvent::ActivityLog {
+            agent,
+            session_id,
+            requires_existing_session,
             tool_name,
             tool_input,
             tool_response,
-        } => activity::handle_activity_log(pane, &tool_name, &tool_input, &tool_response),
+        } => {
+            if requires_existing_session
+                && !context::pane_tracks_session(pane, &agent, session_id.as_deref())
+            {
+                return 0;
+            }
+            activity::handle_activity_log(pane, &tool_name, &tool_input, &tool_response)
+        }
         AgentEvent::PermissionDenied {
             agent,
             cwd,
             permission_mode,
+            requires_existing_session,
             worktree,
             session_id,
             ..
@@ -196,6 +207,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             handlers::on_permission_denied(
                 pane,
                 &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
+                requires_existing_session,
                 &notifications,
             )
         }
@@ -224,5 +236,70 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
         } => handlers::on_teammate_idle(pane, &teammate_name, &idle_reason),
         AgentEvent::WorktreeCreate => 0,
         AgentEvent::WorktreeRemove { .. } => handlers::on_worktree_remove(pane),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use serde_json::{Value, json};
+
+    use super::*;
+    use crate::tmux;
+
+    #[test]
+    fn stale_grok_activity_does_not_recreate_state_after_session_end() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%ACTIVITY_AFTER_SESSION_END";
+        let log_path = crate::activity::log_file_path(pane);
+        let _ = fs::remove_file(&log_path);
+
+        handle_event(
+            pane,
+            "grok",
+            AgentEvent::ActivityLog {
+                agent: "grok".into(),
+                session_id: Some("ended-session".into()),
+                requires_existing_session: true,
+                tool_name: "Bash".into(),
+                tool_input: json!({"command": "npm run dev", "background": true}),
+                tool_response: Value::Null,
+            },
+        );
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_BG_CMD));
+        assert!(!log_path.exists());
+    }
+
+    #[test]
+    fn grok_activity_accepts_current_tracked_child_session() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%ACTIVITY_CURRENT_CHILD";
+        let log_path = crate::activity::log_file_path(pane);
+        let _ = fs::remove_file(&log_path);
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "grok");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "host-session");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Review PR:child-session");
+
+        handle_event(
+            pane,
+            "grok",
+            AgentEvent::ActivityLog {
+                agent: "grok".into(),
+                session_id: Some("child-session".into()),
+                requires_existing_session: true,
+                tool_name: "Read".into(),
+                tool_input: json!({"file_path": "/repo/src/lib.rs"}),
+                tool_response: Value::Null,
+            },
+        );
+
+        assert!(
+            fs::read_to_string(&log_path)
+                .unwrap()
+                .contains("|Read|lib.rs")
+        );
+        let _ = fs::remove_file(log_path);
     }
 }

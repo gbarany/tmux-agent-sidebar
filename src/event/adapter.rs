@@ -97,6 +97,9 @@ mod tests {
         assert_eq!(
             event,
             AgentEvent::ActivityLog {
+                agent: "grok".into(),
+                session_id: None,
+                requires_existing_session: true,
                 tool_name: "Read".into(),
                 tool_input: json!({
                     "path": "/tmp/project/src/main.rs",

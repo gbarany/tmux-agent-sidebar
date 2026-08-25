@@ -115,6 +115,11 @@ pub enum AgentEvent {
         children_may_outlive_turn: bool,
     },
     ActivityLog {
+        agent: String,
+        session_id: Option<String>,
+        /// Whether this event must belong to the tracked host or one of its
+        /// currently tracked child sessions before activity may be recorded.
+        requires_existing_session: bool,
         tool_name: String,
         tool_input: Value,
         tool_response: Value,
@@ -123,6 +128,9 @@ pub enum AgentEvent {
         agent: String,
         cwd: String,
         permission_mode: String,
+        /// Whether this event must belong to the tracked host or one of its
+        /// currently tracked child sessions before attention may be raised.
+        requires_existing_session: bool,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
         session_id: Option<String>,

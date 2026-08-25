@@ -3,6 +3,8 @@ use super::pending::{PENDING_SESSION_END, PENDING_WORKTREE_REMOVE};
 use crate::event::WorktreeInfo;
 use crate::tmux;
 
+use super::subagents::contains_subagent;
+
 /// Bundle of hook-payload fields shared by 6 `AgentEvent` variants
 /// (SessionStart / UserPromptSubmit / Notification / Stop / StopFailure /
 /// PermissionDenied). Passing this as a single reference keeps each
@@ -41,6 +43,27 @@ pub(in crate::cli::hook) fn set_agent_meta(pane: &str, ctx: &AgentContext<'_>) {
         tmux::set_pane_option(pane, tmux::PANE_PERMISSION_MODE, ctx.permission_mode);
     }
     sync_pane_location(pane, ctx.cwd, ctx.worktree, ctx.session_id);
+}
+
+pub(in crate::cli::hook) fn pane_tracks_session(
+    pane: &str,
+    agent: &str,
+    session_id: Option<&str>,
+) -> bool {
+    if tmux::get_pane_option_value(pane, tmux::PANE_AGENT) != agent {
+        return false;
+    }
+    let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
+        return false;
+    };
+
+    // Grok child hook envelopes use the child session id created from the
+    // SubagentStart subagent id, so either tracked identity is current.
+    tmux::get_pane_option_value(pane, tmux::PANE_SESSION_ID) == session_id
+        || contains_subagent(
+            &tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS),
+            session_id,
+        )
 }
 
 pub(in crate::cli::hook) fn clear_run_state(pane: &str) {

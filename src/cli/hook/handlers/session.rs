@@ -18,6 +18,11 @@ pub(in crate::cli::hook) fn on_session_start(
     source: &str,
     top_level: bool,
 ) -> i32 {
+    // A child SessionStart can share the parent's pane. Once SubagentStart has
+    // registered that child, any write here could reset the active parent turn.
+    if !top_level && !pane_writes_allowed(pane) {
+        return 0;
+    }
     if top_level {
         tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
     }
@@ -32,11 +37,6 @@ pub(in crate::cli::hook) fn on_session_start(
         tmux::unset_pane_option(pane, tmux::PANE_TURN_ACTIVE);
     }
     tmux::unset_pane_option(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY);
-    // Ambiguous SessionStart events deliberately preserve `@pane_subagents`.
-    // Claude children share the parent's `$TMUX_PANE`, so clearing the list
-    // after SubagentStart would drop the marker that `should_update_cwd` and
-    // `drain_pending_teardowns` rely on. Adapters that guarantee a top-level
-    // start clear stale child state before metadata synchronization above.
     // A fresh session overrides any deferred teardown that was waiting
     // for the previous run's subagents to drain.
     tmux::unset_pane_option(pane, PENDING_SESSION_END);
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn on_session_start_preserves_subagents_list() {
+    fn ambiguous_child_session_start_preserves_parent_turn_state() {
         // Regression: a subagent's own SessionStart arriving after
         // SubagentStart seeded @pane_subagents must NOT drop the
         // parent's list. If it did, should_update_cwd would start
@@ -243,19 +243,33 @@ mod tests {
         let pane = "%SUBAGENT_LIVE";
         tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Explore:sub-1");
         tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "claude");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo/parent");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "parent-session");
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT, "Parent request");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT_ID, "parent-prompt");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT_SOURCE, "user");
 
         on_session_start(pane, &basic_ctx(), "", false);
 
-        assert_eq!(
-            tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
-            Some("Explore:sub-1"),
-            "SessionStart must not wipe an active subagent list"
-        );
-        assert_eq!(
-            tmux::test_mock::get(pane, tmux::PANE_TURN_ACTIVE).as_deref(),
-            Some("1"),
-            "child SessionStart must not clear the active parent turn"
-        );
+        for (key, expected) in [
+            (tmux::PANE_SUBAGENTS, "Explore:sub-1"),
+            (tmux::PANE_TURN_ACTIVE, "1"),
+            (tmux::PANE_AGENT, "claude"),
+            (tmux::PANE_CWD, "/repo/parent"),
+            (tmux::PANE_SESSION_ID, "parent-session"),
+            (tmux::PANE_STATUS, "running"),
+            (tmux::PANE_PROMPT, "Parent request"),
+            (tmux::PANE_PROMPT_ID, "parent-prompt"),
+            (tmux::PANE_PROMPT_SOURCE, "user"),
+        ] {
+            assert_eq!(
+                tmux::test_mock::get(pane, key).as_deref(),
+                Some(expected),
+                "ambiguous child SessionStart changed parent-owned {key}"
+            );
+        }
     }
 
     #[test]

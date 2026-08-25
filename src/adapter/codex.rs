@@ -86,6 +86,9 @@ impl EventAdapter for CodexAdapter {
                     return None;
                 }
                 Some(AgentEvent::ActivityLog {
+                    agent: CODEX_AGENT.into(),
+                    session_id: optional_str(input, "session_id"),
+                    requires_existing_session: false,
                     tool_name: tool_name.into(),
                     tool_input: json_value_or_null(input, "tool_input"),
                     tool_response: json_value_or_null(input, "tool_response"),

@@ -248,6 +248,7 @@ impl EventAdapter for GrokAdapter {
                 agent: GROK_AGENT.into(),
                 cwd: json_str(input, &["cwd"]).into(),
                 permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
+                requires_existing_session: true,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, &["sessionId", "session_id"]),
@@ -293,6 +294,9 @@ impl EventAdapter for GrokAdapter {
                     value_or_null(input, &["toolInput", "tool_input"]),
                 );
                 Some(AgentEvent::ActivityLog {
+                    agent: GROK_AGENT.into(),
+                    session_id: optional_str(input, &["sessionId", "session_id"]),
+                    requires_existing_session: true,
                     tool_name,
                     tool_input,
                     tool_response: value_or_null(input, &["toolResult", "tool_result"]),
@@ -612,6 +616,7 @@ mod tests {
                 agent: GROK_AGENT.into(),
                 cwd: "/repo".into(),
                 permission_mode: "plan".into(),
+                requires_existing_session: true,
                 worktree: None,
                 agent_id: None,
                 session_id: Some("session-6".into()),
@@ -723,6 +728,7 @@ mod tests {
             .parse(
                 "activity-log",
                 &json!({
+                    "sessionId": "child-session-1",
                     "toolName": "run_terminal_command",
                     "toolInput": {"command": "cargo test"}
                 }),
@@ -730,10 +736,16 @@ mod tests {
             .unwrap();
         match event {
             AgentEvent::ActivityLog {
+                agent,
+                session_id,
+                requires_existing_session,
                 tool_name,
                 tool_input,
                 ..
             } => {
+                assert_eq!(agent, GROK_AGENT);
+                assert_eq!(session_id.as_deref(), Some("child-session-1"));
+                assert!(requires_existing_session);
                 assert_eq!(tool_name, "Bash");
                 assert_eq!(tool_input["command"], "cargo test");
             }

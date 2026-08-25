@@ -214,6 +214,7 @@ impl EventAdapter for ClaudeAdapter {
                 agent: CLAUDE_AGENT.into(),
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
+                requires_existing_session: false,
                 worktree: parse_worktree(input),
                 agent_id: optional_str(input, "agent_id"),
                 session_id: optional_str(input, "session_id"),
@@ -254,6 +255,9 @@ impl EventAdapter for ClaudeAdapter {
                     return None;
                 }
                 Some(AgentEvent::ActivityLog {
+                    agent: CLAUDE_AGENT.into(),
+                    session_id: optional_str(input, "session_id"),
+                    requires_existing_session: false,
                     tool_name: tool_name.into(),
                     tool_input: parse_json_field(input, "tool_input"),
                     tool_response: parse_json_field(input, "tool_response"),

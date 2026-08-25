@@ -36,6 +36,14 @@ fn sanitize_subagent_label(label: &str) -> String {
     flattened.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+pub(in crate::cli::hook) fn contains_subagent(current: &str, agent_id: &str) -> bool {
+    if current.is_empty() || agent_id.is_empty() {
+        return false;
+    }
+    let needle = format!(":{}", agent_id);
+    current.split(',').any(|entry| entry.ends_with(&needle))
+}
+
 /// Remove the entry with the given `agent_id` from the comma-separated list.
 /// Returns `None` if `agent_id` is not present, `Some(new_list)` otherwise
 /// (empty string if the list becomes empty).
@@ -100,6 +108,15 @@ mod tests {
     #[test]
     fn remove_subagent_empty_list() {
         assert_eq!(remove_subagent("", "sub-1"), None);
+    }
+
+    #[test]
+    fn contains_subagent_matches_exact_tracked_id() {
+        let current = "Code reviewer:child-1,Type reviewer:child-2";
+        assert!(contains_subagent(current, "child-1"));
+        assert!(contains_subagent(current, "child-2"));
+        assert!(!contains_subagent(current, "child"));
+        assert!(!contains_subagent(current, ""));
     }
 
     #[test]

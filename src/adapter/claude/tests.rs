@@ -314,6 +314,9 @@ fn activity_log() {
     assert_eq!(
         event,
         AgentEvent::ActivityLog {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             tool_name: "Read".into(),
             tool_input: json!({"file_path": "/a/b.rs"}),
             tool_response: Value::Null,
@@ -329,6 +332,9 @@ fn activity_log_string_tool_input() {
     assert_eq!(
         event,
         AgentEvent::ActivityLog {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             tool_name: "Edit".into(),
             tool_input: json!({"file_path": "/a/b.rs"}),
             tool_response: Value::Null,
@@ -723,6 +729,7 @@ fn permission_denied_event() {
             agent: "claude".into(),
             cwd: "/tmp".into(),
             permission_mode: "auto".into(),
+            requires_existing_session: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -826,6 +833,9 @@ fn activity_log_with_tool_response() {
     assert_eq!(
         event,
         AgentEvent::ActivityLog {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             tool_name: "TaskCreate".into(),
             tool_input: json!({"subject": "Fix bug"}),
             tool_response: json!({"task": {"id": "42"}}),

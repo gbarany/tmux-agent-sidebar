@@ -123,6 +123,9 @@ impl EventAdapter for OpenCodeAdapter {
                 let tool_input =
                     normalize_tool_input(&tool_name, json_value_or_null(input, "tool_input"));
                 Some(AgentEvent::ActivityLog {
+                    agent: OPENCODE_AGENT.into(),
+                    session_id: optional_str(input, "session_id"),
+                    requires_existing_session: false,
                     tool_name,
                     tool_input,
                     tool_response: json_value_or_null(input, "tool_response"),
@@ -204,6 +207,7 @@ mod tests {
                 tool_name,
                 tool_input,
                 tool_response,
+                ..
             } => {
                 assert_eq!(tool_name, "Bash");
                 assert_eq!(tool_input["command"], "ls");

@@ -54,12 +54,12 @@ pub(in crate::cli::hook) fn on_session_end(
     pane: &str,
     agent_name: &str,
     end_reason: &str,
+    top_level: bool,
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
-    // Subagents share the parent's `$TMUX_PANE`, so a SessionEnd fired
-    // while `@pane_subagents` is populated is almost certainly a child's
-    // (we have no way to distinguish parent vs. child events otherwise).
-    // Bail out early before:
+    // Ambiguous SessionEnd events fired while `@pane_subagents` is populated
+    // are likely to belong to a child sharing the parent's `$TMUX_PANE`.
+    // Bail out early unless the adapter supplied a top-level guarantee, before:
     //
     //   1. the notification path consumes the run-scoped fingerprint,
     //      which would silently deduplicate the parent's real SessionEnd
@@ -68,12 +68,10 @@ pub(in crate::cli::hook) fn on_session_end(
     //      would later turn into `run_session_end_teardown` — wiping a
     //      still-running parent pane the moment the last subagent stops.
     //
-    // The tradeoff is that a parent SessionEnd that genuinely races
-    // ahead of every SubagentStop will be ignored too, leaving stale
-    // metadata until the next SessionStart clears it. Compared to
-    // clobbering a live parent, the stale-metadata failure mode is
-    // far safer and the one the user can recover from.
-    if !pane_writes_allowed(pane) {
+    // For ambiguous adapters, the tradeoff is that a parent SessionEnd that
+    // races ahead of every SubagentStop is ignored too. Adapters that can
+    // distinguish the host event set `top_level` and teardown immediately.
+    if !top_level && !pane_writes_allowed(pane) {
         return 0;
     }
 
@@ -135,7 +133,7 @@ mod tests {
         let _ = fs::create_dir_all(log_path.parent().unwrap());
         fs::write(&log_path, "1234567890|Read|main.rs\n").unwrap();
 
-        let exit = on_session_end(pane, "claude", "", &default_notifications());
+        let exit = on_session_end(pane, "claude", "", false, &default_notifications());
 
         assert_eq!(exit, 0);
         assert!(
@@ -166,13 +164,36 @@ mod tests {
         tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo");
         tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
 
-        let exit = on_session_end(pane, "claude", "", &default_notifications());
+        let exit = on_session_end(pane, "claude", "", false, &default_notifications());
 
         assert_eq!(exit, 0);
         assert!(
             !tmux::test_mock::contains(pane, tmux::PANE_AGENT),
             "lone SessionEnd should clear @pane_agent"
         );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_CWD));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STATUS));
+    }
+
+    #[test]
+    fn top_level_grok_session_end_clears_state_while_subagent_is_tracked() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_HOST_END_WITH_CHILD";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, tmux::GROK_AGENT);
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "explore:sub-1");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo");
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
+
+        on_session_end(
+            pane,
+            tmux::GROK_AGENT,
+            "shutdown",
+            true,
+            &default_notifications(),
+        );
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_AGENT));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_CWD));
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_STATUS));
     }
@@ -352,7 +373,7 @@ mod tests {
     fn on_session_end_routine_reason_does_not_notify() {
         let _guard = tmux::test_mock::install();
         let pane = "%END_ROUTINE";
-        on_session_end(pane, "claude", "clear", &notifications_enabled_all());
+        on_session_end(pane, "claude", "clear", false, &notifications_enabled_all());
         // The notification helper writes a dedup stamp only when a notification
         // actually goes out; a missing stamp is proof the gate rejected it.
         assert!(
@@ -374,6 +395,7 @@ mod tests {
             pane,
             "cargo-test: on_session_end_logout",
             "logout",
+            false,
             &notifications_enabled_all(),
         );
         // If `send_desktop_notification` succeeds (local dev with notify-send
@@ -400,6 +422,7 @@ mod tests {
             pane,
             "cargo-test: on_session_end_bypass_disabled",
             "bypass_permissions_disabled",
+            false,
             &notifications_enabled_all(),
         );
         let stamp_key = tmux::PANE_OS_NOTIFY_TASK_COMPLETED;

@@ -56,9 +56,12 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             &source,
             top_level,
         ),
-        AgentEvent::SessionEnd { end_reason } => {
+        AgentEvent::SessionEnd {
+            end_reason,
+            top_level,
+        } => {
             let notifications = notification_settings();
-            handlers::on_session_end(pane, agent_name, &end_reason, &notifications)
+            handlers::on_session_end(pane, agent_name, &end_reason, top_level, &notifications)
         }
         AgentEvent::UserPromptSubmit {
             agent,
@@ -101,6 +104,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             last_message,
             response,
             prompt_id,
+            children_may_outlive_turn,
             worktree,
             session_id,
             ..
@@ -112,6 +116,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
                 &last_message,
                 response.as_deref(),
                 prompt_id.as_deref(),
+                children_may_outlive_turn,
                 &notifications,
             )
         }
@@ -120,6 +125,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             cwd,
             permission_mode,
             prompt_id,
+            children_may_outlive_turn,
             worktree,
             session_id,
             ..
@@ -127,6 +133,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             pane,
             &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
             prompt_id.as_deref(),
+            children_may_outlive_turn,
         ),
         AgentEvent::StopFailure {
             agent,
@@ -151,9 +158,18 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             agent_type,
             agent_id,
         } => handlers::on_subagent_start(pane, &agent_type, agent_id.as_deref()),
-        AgentEvent::SubagentStop { agent_id, .. } => {
+        AgentEvent::SubagentStop {
+            agent_id,
+            children_may_outlive_turn,
+            ..
+        } => {
             let notifications = notification_settings();
-            handlers::on_subagent_stop(pane, agent_id.as_deref(), &notifications)
+            handlers::on_subagent_stop(
+                pane,
+                agent_id.as_deref(),
+                children_may_outlive_turn,
+                &notifications,
+            )
         }
         AgentEvent::ActivityLog {
             tool_name,

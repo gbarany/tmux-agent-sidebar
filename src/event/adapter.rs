@@ -32,7 +32,8 @@ mod tests {
         assert_eq!(
             event,
             Some(AgentEvent::SessionEnd {
-                end_reason: "".into()
+                end_reason: "".into(),
+                top_level: false,
             })
         );
     }
@@ -173,6 +174,31 @@ mod tests {
     }
 
     #[test]
+    fn adapters_normalize_child_turn_lifetime_policy() {
+        for (agent_name, expected) in [
+            ("claude", false),
+            ("codex", false),
+            ("opencode", false),
+            ("grok", true),
+        ] {
+            let event = resolve_adapter(agent_name)
+                .unwrap()
+                .parse("stop", &json!({}))
+                .unwrap();
+            assert!(
+                matches!(
+                    event,
+                    AgentEvent::Stop {
+                        children_may_outlive_turn,
+                        ..
+                    } if children_may_outlive_turn == expected
+                ),
+                "unexpected child-turn lifetime policy for {agent_name}: {event:?}"
+            );
+        }
+    }
+
+    #[test]
     fn codex_ignores_claude_only_events() {
         let adapter = resolve_adapter("codex").unwrap();
         assert!(adapter.parse("notification", &json!({})).is_none());
@@ -241,7 +267,8 @@ mod tests {
         assert_eq!(
             claude.parse("session-end", &json!({})),
             Some(AgentEvent::SessionEnd {
-                end_reason: "".into()
+                end_reason: "".into(),
+                top_level: false,
             }),
         );
         assert!(

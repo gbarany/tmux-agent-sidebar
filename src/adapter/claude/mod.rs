@@ -144,6 +144,7 @@ impl EventAdapter for ClaudeAdapter {
             }),
             "session-end" => Some(AgentEvent::SessionEnd {
                 end_reason: json_str(input, "end_reason").into(),
+                top_level: false,
             }),
             "user-prompt-submit" => Some(AgentEvent::UserPromptSubmit {
                 agent: CLAUDE_AGENT.into(),
@@ -176,6 +177,7 @@ impl EventAdapter for ClaudeAdapter {
                 last_message: json_str(input, "last_assistant_message").into(),
                 response: None,
                 prompt_id: None,
+                children_may_outlive_turn: false,
                 worktree: parse_worktree(input),
                 agent_id: optional_str(input, "agent_id"),
                 session_id: optional_str(input, "session_id"),
@@ -241,6 +243,7 @@ impl EventAdapter for ClaudeAdapter {
                     agent_id: optional_str(input, "agent_id"),
                     last_message: json_str(input, "last_assistant_message").into(),
                     transcript_path: json_str(input, "agent_transcript_path").into(),
+                    children_may_outlive_turn: false,
                 })
             }
             "activity-log" => {

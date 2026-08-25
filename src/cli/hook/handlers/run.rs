@@ -92,14 +92,13 @@ fn settle_turn_state(
     pane: &str,
     ctx: &AgentContext<'_>,
     prompt_id: Option<&str>,
+    children_may_outlive_turn: bool,
 ) -> BackgroundWork {
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
 
-    // Only Grok background subagents can outlive the parent turn. Claude Task
-    // children are synchronous, while Codex and OpenCode do not emit a later
-    // SubagentStop that could drain a stale list.
-    if ctx.agent != tmux::GROK_AGENT {
+    // Adapters normalize whether a later child stop can drain this list.
+    if !children_may_outlive_turn {
         tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
     }
 
@@ -127,6 +126,7 @@ pub(in crate::cli::hook) fn on_stop(
     last_message: &str,
     response: Option<&str>,
     prompt_id: Option<&str>,
+    children_may_outlive_turn: bool,
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
     if !turn_end_is_current(pane, prompt_id) {
@@ -140,7 +140,7 @@ pub(in crate::cli::hook) fn on_stop(
         tmux::set_pane_option(pane, tmux::PANE_PROMPT, &msg);
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "response");
     }
-    let background = settle_turn_state(pane, ctx, prompt_id);
+    let background = settle_turn_state(pane, ctx, prompt_id, children_may_outlive_turn);
     let notification_body = stop_body(last_message);
 
     if background.subagent_live
@@ -174,9 +174,10 @@ pub(in crate::cli::hook) fn on_turn_settled(
     pane: &str,
     ctx: &AgentContext<'_>,
     prompt_id: Option<&str>,
+    children_may_outlive_turn: bool,
 ) -> i32 {
     if turn_end_is_current(pane, prompt_id) {
-        settle_turn_state(pane, ctx, prompt_id);
+        settle_turn_state(pane, ctx, prompt_id, children_may_outlive_turn);
     }
     0
 }
@@ -340,6 +341,7 @@ mod tests {
             "",
             None,
             None,
+            false,
             &desktop_notification::DesktopNotificationSettings {
                 enabled: false,
                 events: Default::default(),
@@ -380,6 +382,7 @@ mod tests {
             "",
             None,
             None,
+            false,
             &desktop_notification::DesktopNotificationSettings {
                 enabled: false,
                 events: Default::default(),
@@ -420,6 +423,7 @@ mod tests {
                 "",
                 None,
                 None,
+                false,
                 &desktop_notification::DesktopNotificationSettings {
                     enabled: false,
                     events: Default::default(),
@@ -508,7 +512,7 @@ mod tests {
         on_user_prompt_submit(pane, &ctx, "new", Some("prompt 1"));
         assert!(!turn_end_is_current(pane, Some("prompt|1")));
 
-        on_turn_settled(pane, &ctx, Some("prompt|1"));
+        on_turn_settled(pane, &ctx, Some("prompt|1"), true);
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("running"),
@@ -528,7 +532,7 @@ mod tests {
             session_id: &None,
         };
         on_user_prompt_submit(pane, &ctx, "cancel me", Some("prompt-1"));
-        on_turn_settled(pane, &ctx, Some("prompt-1"));
+        on_turn_settled(pane, &ctx, Some("prompt-1"), true);
 
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
@@ -562,7 +566,7 @@ mod tests {
             session_id: &None,
         };
 
-        on_turn_settled(pane, &ctx, None);
+        on_turn_settled(pane, &ctx, None, true);
 
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
@@ -603,6 +607,7 @@ mod tests {
             "background child still working",
             None,
             None,
+            true,
             &notifications,
         );
 
@@ -637,6 +642,7 @@ mod tests {
             "old response",
             None,
             Some("prompt-old"),
+            true,
             &desktop_notification::DesktopNotificationSettings {
                 enabled: false,
                 events: Default::default(),
@@ -682,6 +688,7 @@ mod tests {
             "done",
             None,
             Some("prompt-current"),
+            true,
             &desktop_notification::DesktopNotificationSettings {
                 enabled: false,
                 events: Default::default(),
@@ -757,6 +764,7 @@ mod tests {
             "new response",
             None,
             Some("prompt-new"),
+            true,
             &notifications,
         );
         on_stop_failure(
@@ -801,6 +809,7 @@ mod tests {
             "success",
             None,
             Some("prompt-1"),
+            true,
             &notifications,
         );
         on_stop_failure(pane, &ctx, "late failure", Some("prompt-1"), &notifications);
@@ -839,6 +848,7 @@ mod tests {
             "stale identified response",
             None,
             Some("prompt-old"),
+            true,
             &notifications,
         );
 
@@ -889,6 +899,7 @@ mod tests {
             "old response",
             None,
             Some("prompt-old"),
+            true,
             &notifications,
         );
 
@@ -972,7 +983,7 @@ mod tests {
         };
 
         on_user_prompt_submit(pane, &ctx, "turn missing its end report", Some("prompt-1"));
-        on_turn_settled(pane, &ctx, None);
+        on_turn_settled(pane, &ctx, None, true);
 
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),

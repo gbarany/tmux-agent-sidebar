@@ -47,7 +47,8 @@ fn session_end() {
     assert_eq!(
         adapter.parse("session-end", &json!({})).unwrap(),
         AgentEvent::SessionEnd {
-            end_reason: "".into()
+            end_reason: "".into(),
+            top_level: false,
         }
     );
 }
@@ -61,7 +62,8 @@ fn session_end_captures_reason() {
     assert_eq!(
         event,
         AgentEvent::SessionEnd {
-            end_reason: "logout".into()
+            end_reason: "logout".into(),
+            top_level: false,
         }
     );
 }
@@ -143,6 +145,7 @@ fn stop() {
             last_message: "done".into(),
             response: None,
             prompt_id: None,
+            children_may_outlive_turn: false,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -273,6 +276,7 @@ fn subagent_stop() {
             agent_id: None,
             last_message: "".into(),
             transcript_path: "".into(),
+            children_may_outlive_turn: false,
         }
     );
 }
@@ -293,6 +297,7 @@ fn subagent_stop_captures_full_payload() {
             agent_id: Some("sub-42".into()),
             last_message: "Found the bug at main.rs:42".into(),
             transcript_path: "/tmp/sub-transcript.json".into(),
+            children_may_outlive_turn: false,
         }
     );
 }
@@ -644,6 +649,7 @@ fn stop_empty_last_message() {
             last_message: "".into(),
             response: None,
             prompt_id: None,
+            children_may_outlive_turn: false,
             worktree: None,
             agent_id: None,
             session_id: None,

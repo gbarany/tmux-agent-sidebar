@@ -168,6 +168,7 @@ impl EventAdapter for GrokAdapter {
             }),
             "session-end" if !is_subagent_event(input) => Some(AgentEvent::SessionEnd {
                 end_reason: json_str(input, &["reason"]).into(),
+                top_level: true,
             }),
             "user-prompt-submit" if !is_subagent_event(input) => {
                 Some(AgentEvent::UserPromptSubmit {
@@ -206,6 +207,7 @@ impl EventAdapter for GrokAdapter {
                     .into(),
                     response: None,
                     prompt_id: optional_str(input, &["promptId", "prompt_id"]),
+                    children_may_outlive_turn: true,
                     worktree: None,
                     agent_id: None,
                     session_id: optional_str(input, &["sessionId", "session_id"]),
@@ -216,6 +218,7 @@ impl EventAdapter for GrokAdapter {
                 cwd: json_str(input, &["cwd"]).into(),
                 permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
                 prompt_id: optional_str(input, &["promptId", "prompt_id"]),
+                children_may_outlive_turn: true,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, &["sessionId", "session_id"]),
@@ -274,6 +277,7 @@ impl EventAdapter for GrokAdapter {
                     )
                     .into(),
                     transcript_path: json_str(input, &["transcriptPath", "transcript_path"]).into(),
+                    children_may_outlive_turn: true,
                 })
             }
             "activity-log" => {
@@ -394,6 +398,7 @@ mod tests {
             GrokAdapter.parse("session-end", &json!({"reason": "shutdown"})),
             Some(AgentEvent::SessionEnd {
                 end_reason: "shutdown".into(),
+                top_level: true,
             })
         );
     }
@@ -470,6 +475,7 @@ mod tests {
                 response,
                 prompt_id,
                 session_id,
+                children_may_outlive_turn,
                 ..
             } => {
                 assert_eq!(agent, GROK_AGENT);
@@ -477,6 +483,7 @@ mod tests {
                 assert!(response.is_none(), "Grok Stop must emit no decision output");
                 assert_eq!(prompt_id.as_deref(), Some("prompt-3"));
                 assert_eq!(session_id.as_deref(), Some("session-3"));
+                assert!(children_may_outlive_turn);
             }
             other => panic!("expected Stop, got {other:?}"),
         }
@@ -557,10 +564,12 @@ mod tests {
             AgentEvent::TurnSettled {
                 prompt_id,
                 session_id,
+                children_may_outlive_turn,
                 ..
             } => {
                 assert!(prompt_id.is_none());
                 assert_eq!(session_id.as_deref(), Some("session-5"));
+                assert!(children_may_outlive_turn);
             }
             other => panic!("expected TurnSettled, got {other:?}"),
         }
@@ -638,6 +647,7 @@ mod tests {
                 agent_id: Some("subagent-1".into()),
                 last_message: "found it".into(),
                 transcript_path: "/tmp/subagent.jsonl".into(),
+                children_may_outlive_turn: true,
             })
         );
     }
@@ -648,6 +658,7 @@ mod tests {
             GrokAdapter.parse("session-end", &json!({"endReason": "shutdown"})),
             Some(AgentEvent::SessionEnd {
                 end_reason: "".into(),
+                top_level: true,
             })
         );
 

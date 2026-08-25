@@ -34,6 +34,9 @@ pub enum AgentEvent {
     },
     SessionEnd {
         end_reason: String,
+        /// Whether the adapter guarantees this belongs to the pane's host
+        /// session rather than a child sharing the same `$TMUX_PANE`.
+        top_level: bool,
     },
     UserPromptSubmit {
         agent: String,
@@ -65,6 +68,8 @@ pub enum AgentEvent {
         last_message: String,
         response: Option<String>,
         prompt_id: Option<String>,
+        /// Whether tracked children may continue after this parent turn ends.
+        children_may_outlive_turn: bool,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
         session_id: Option<String>,
@@ -76,6 +81,8 @@ pub enum AgentEvent {
         cwd: String,
         permission_mode: String,
         prompt_id: Option<String>,
+        /// Whether tracked children may continue after this parent turn ends.
+        children_may_outlive_turn: bool,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
         session_id: Option<String>,
@@ -99,6 +106,8 @@ pub enum AgentEvent {
         agent_id: Option<String>,
         last_message: String,
         transcript_path: String,
+        /// Whether this child may be the final work keeping a settled parent active.
+        children_may_outlive_turn: bool,
     },
     ActivityLog {
         tool_name: String,

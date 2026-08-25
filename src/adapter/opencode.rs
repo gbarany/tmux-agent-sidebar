@@ -98,6 +98,7 @@ impl EventAdapter for OpenCodeAdapter {
                 last_message: json_str(input, "last_message").into(),
                 response: None,
                 prompt_id: None,
+                children_may_outlive_turn: false,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),

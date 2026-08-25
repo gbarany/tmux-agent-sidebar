@@ -27,6 +27,7 @@ pub(in crate::cli::hook) fn on_subagent_start(
 pub(in crate::cli::hook) fn on_subagent_stop(
     pane: &str,
     agent_id: Option<&str>,
+    children_may_outlive_turn: bool,
     notifications: &desktop_notification::DesktopNotificationSettings,
 ) -> i32 {
     let Some(id) = agent_id.filter(|s| !s.is_empty()) else {
@@ -48,10 +49,10 @@ pub(in crate::cli::hook) fn on_subagent_stop(
     // because subagents were active when SessionEnd / WorktreeRemove fired.
     if drained_to_empty {
         // Child hooks can temporarily replace `background` with `waiting` or
-        // `running`; Grok's turn marker is the durable parent-settlement
-        // signal. Other agents cannot infer settlement from an absent marker.
+        // `running`; adapters declare whether the turn marker is a durable
+        // parent-settlement signal for this child lifecycle.
         let agent = tmux::get_pane_option_value(pane, tmux::PANE_AGENT);
-        let parent_turn_settled = agent == tmux::GROK_AGENT
+        let parent_turn_settled = children_may_outlive_turn
             && tmux::get_pane_option_value(pane, tmux::PANE_TURN_ACTIVE).is_empty();
         let deferred_body =
             tmux::get_pane_option_value(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY);
@@ -133,7 +134,7 @@ mod tests {
         tmux::test_mock::set(pane, tmux::PANE_STATUS, "background");
         tmux::test_mock::set(pane, tmux::PANE_STARTED_AT, "1700");
 
-        on_subagent_stop(pane, Some("sub-1"), &default_notifications());
+        on_subagent_stop(pane, Some("sub-1"), true, &default_notifications());
 
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
@@ -156,7 +157,7 @@ mod tests {
             "parent response",
         );
 
-        on_subagent_stop(pane, Some("sub-1"), &default_notifications());
+        on_subagent_stop(pane, Some("sub-1"), true, &default_notifications());
 
         assert!(
             !tmux::test_mock::contains(pane, tmux::PANE_PENDING_STOP_NOTIFICATION_BODY),
@@ -181,7 +182,7 @@ mod tests {
                 "parent response",
             );
 
-            on_subagent_stop(&pane, Some("sub-1"), &default_notifications());
+            on_subagent_stop(&pane, Some("sub-1"), true, &default_notifications());
 
             assert_eq!(
                 tmux::test_mock::get(&pane, tmux::PANE_STATUS).as_deref(),
@@ -212,7 +213,7 @@ mod tests {
             "parent response",
         );
 
-        on_subagent_stop(pane, Some("sub-1"), &default_notifications());
+        on_subagent_stop(pane, Some("sub-1"), true, &default_notifications());
 
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
@@ -242,7 +243,7 @@ mod tests {
             tmux::test_mock::set(&pane, tmux::PANE_WAIT_REASON, "permission");
             tmux::test_mock::set(&pane, tmux::PANE_ATTENTION, "notification");
 
-            on_subagent_stop(&pane, Some("sub-1"), &default_notifications());
+            on_subagent_stop(&pane, Some("sub-1"), true, &default_notifications());
 
             assert_eq!(
                 tmux::test_mock::get(&pane, tmux::PANE_STATUS).as_deref(),
@@ -268,7 +269,7 @@ mod tests {
         tmux::test_mock::set(pane, tmux::PANE_STARTED_AT, "1700");
         tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
 
-        on_subagent_stop(pane, Some("sub-1"), &default_notifications());
+        on_subagent_stop(pane, Some("sub-1"), true, &default_notifications());
 
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
@@ -289,7 +290,7 @@ mod tests {
         tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
         tmux::test_mock::set(pane, tmux::PANE_STARTED_AT, "1700");
 
-        on_subagent_stop(pane, Some("sub-1"), &default_notifications());
+        on_subagent_stop(pane, Some("sub-1"), false, &default_notifications());
 
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
@@ -332,7 +333,7 @@ mod tests {
         let _ = fs::create_dir_all(log_path.parent().unwrap());
         fs::write(&log_path, "1234567890|Read|main.rs\n").unwrap();
 
-        on_session_end(pane, "claude", "", &default_notifications());
+        on_session_end(pane, "claude", "", false, &default_notifications());
         assert!(
             !tmux::test_mock::contains(pane, PENDING_SESSION_END),
             "child SessionEnd must not record a pending teardown"
@@ -344,7 +345,7 @@ mod tests {
         assert!(log_path.exists());
 
         // Subsequent subagent stop must not trigger a teardown either.
-        on_subagent_stop(pane, Some("sub-1"), &default_notifications());
+        on_subagent_stop(pane, Some("sub-1"), false, &default_notifications());
         assert!(
             tmux::test_mock::contains(pane, tmux::PANE_AGENT),
             "SubagentStop draining an empty list must not tear down a live parent"
@@ -370,7 +371,7 @@ mod tests {
         );
         assert!(tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_NAME));
 
-        on_subagent_stop(pane, Some("sub-1"), &default_notifications());
+        on_subagent_stop(pane, Some("sub-1"), false, &default_notifications());
 
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_NAME));
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_BRANCH));
@@ -398,7 +399,7 @@ mod tests {
         assert!(tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE));
 
         // First child stops — list still has sub-2, teardown must NOT fire.
-        on_subagent_stop(pane, Some("sub-1"), &default_notifications());
+        on_subagent_stop(pane, Some("sub-1"), false, &default_notifications());
         assert!(
             tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_NAME),
             "teardown must wait for the LAST subagent"
@@ -406,7 +407,7 @@ mod tests {
         assert!(tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE));
 
         // Last child stops — now teardown fires.
-        on_subagent_stop(pane, Some("sub-2"), &default_notifications());
+        on_subagent_stop(pane, Some("sub-2"), false, &default_notifications());
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_WORKTREE_NAME));
         assert!(!tmux::test_mock::contains(pane, PENDING_WORKTREE_REMOVE));
     }

@@ -10,6 +10,7 @@ use super::super::notifications::{NotifyLabels, notify_stop};
 pub(in crate::cli::hook) fn on_subagent_start(
     pane: &str,
     agent_type: &str,
+    display_name: Option<&str>,
     agent_id: Option<&str>,
 ) -> i32 {
     // Claude Code always sends agent_id per the hooks spec; drop the
@@ -19,7 +20,7 @@ pub(in crate::cli::hook) fn on_subagent_start(
         return 0;
     };
     let current = tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS);
-    let new_val = append_subagent(&current, agent_type, id);
+    let new_val = append_subagent(&current, agent_type, display_name, id);
     tmux::set_pane_option(pane, tmux::PANE_SUBAGENTS, &new_val);
     0
 }
@@ -103,12 +104,12 @@ mod tests {
     fn on_subagent_start_appends_to_list() {
         let _guard = tmux::test_mock::install();
         let pane = "%SUB_START";
-        on_subagent_start(pane, "Explore", Some("sub-1"));
+        on_subagent_start(pane, "Explore", None, Some("sub-1"));
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
             Some("Explore:sub-1")
         );
-        on_subagent_start(pane, "Plan", Some("sub-2"));
+        on_subagent_start(pane, "Plan", None, Some("sub-2"));
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
             Some("Explore:sub-1,Plan:sub-2")
@@ -116,12 +117,30 @@ mod tests {
     }
 
     #[test]
+    fn on_subagent_start_prefers_safe_display_name() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_DESCRIPTION";
+
+        on_subagent_start(
+            pane,
+            "general-purpose",
+            Some("Code review: tests, types\nand errors"),
+            Some("01a0380d-9cc4-7312-a767-351c89120226"),
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
+            Some("Code review tests types and errors:01a0380d-9cc4-7312-a767-351c89120226")
+        );
+    }
+
+    #[test]
     fn on_subagent_start_drops_event_without_id() {
         let _guard = tmux::test_mock::install();
         let pane = "%SUB_NO_ID";
-        on_subagent_start(pane, "Explore", None);
+        on_subagent_start(pane, "Explore", None, None);
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
-        on_subagent_start(pane, "Explore", Some(""));
+        on_subagent_start(pane, "Explore", None, Some(""));
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
     }
 

@@ -100,6 +100,8 @@ pub enum AgentEvent {
     SubagentStart {
         agent_type: String,
         agent_id: Option<String>,
+        /// Optional human-readable identity supplied separately from the type.
+        display_name: Option<String>,
     },
     SubagentStop {
         agent_type: String,

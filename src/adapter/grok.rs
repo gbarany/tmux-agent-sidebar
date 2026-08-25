@@ -260,6 +260,7 @@ impl EventAdapter for GrokAdapter {
                     agent_type: agent_type.into(),
                     agent_id: optional_str(input, &["subagentId", "subagent_id"])
                         .or_else(|| Some(agent_type.to_string())),
+                    display_name: optional_str(input, &["description"]),
                 })
             }
             "subagent-stop" => {
@@ -623,12 +624,14 @@ mod tests {
                 &json!({
                     "subagentId": "subagent-1",
                     "subagentType": "explore",
+                    "description": "Review error handling",
                     "promptId": "child-turn-1"
                 }),
             ),
             Some(AgentEvent::SubagentStart {
                 agent_type: "explore".into(),
                 agent_id: Some("subagent-1".into()),
+                display_name: Some("Review error handling".into()),
             })
         );
         assert_eq!(
@@ -678,6 +681,7 @@ mod tests {
             Some(AgentEvent::SubagentStart {
                 agent_type: "explore".into(),
                 agent_id: Some("explore".into()),
+                display_name: None,
             })
         );
 

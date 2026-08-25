@@ -509,14 +509,14 @@ fn sanitize_prompt(raw: &str) -> String {
 /// Format: comma-separated "type" entries, e.g. "Explore,Explore,Plan"
 /// Parse the comma-separated `@pane_subagents` value into display strings.
 ///
-/// Each entry is either `agent_type` (legacy) or `agent_type:agent_id`
+/// Each entry is either `agent_type` (legacy) or `display_label:agent_id`
 /// (current). When an `agent_id` is present, the entry is rendered as
-/// `"agent_type #<id-prefix>"` where `<id-prefix>` is the first 4 characters
-/// of the id — stable per instance, so the UI label does not shift when
-/// sibling subagents stop. The `#` embedding is recognized by the `#`-based
+/// `"display_label #<id-suffix>"` where `<id-suffix>` is the final 4
+/// characters of the id. This stays useful for UUIDv7 siblings that share a
+/// timestamp prefix. The `#` embedding is recognized by the `#`-based
 /// numbering branch in `subagent_rows`, which keeps it verbatim.
 fn parse_subagents(raw: &str) -> Vec<String> {
-    const ID_PREFIX_LEN: usize = 4;
+    const ID_TAG_LEN: usize = 4;
     if raw.is_empty() {
         return vec![];
     }
@@ -524,9 +524,10 @@ fn parse_subagents(raw: &str) -> Vec<String> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|entry| match entry.split_once(':') {
-            Some((ty, id)) if !id.is_empty() => {
-                let prefix: String = id.chars().take(ID_PREFIX_LEN).collect();
-                format!("{} #{}", ty, prefix)
+            Some((label, id)) if !id.is_empty() => {
+                let reversed: String = id.chars().rev().take(ID_TAG_LEN).collect();
+                let suffix: String = reversed.chars().rev().collect();
+                format!("{} #{}", label, suffix)
             }
             _ => entry.to_string(),
         })
@@ -737,28 +738,31 @@ mod tests {
     }
 
     #[test]
-    fn parse_subagents_renders_id_prefix() {
-        // Current format: `type:id`. The id prefix is used as a stable
-        // `#<prefix>` label so surviving siblings do not renumber when
+    fn parse_subagents_renders_id_suffix() {
+        // Current format: `label:id`. The id suffix is used as a stable
+        // `#<suffix>` label so surviving siblings do not renumber when
         // another subagent stops.
         assert_eq!(
             parse_subagents("Explore:sub123456,Plan:abc987654"),
-            vec!["Explore #sub1", "Plan #abc9"]
+            vec!["Explore #3456", "Plan #7654"]
         );
     }
 
     #[test]
-    fn parse_subagents_id_prefix_distinguishes_parallel_same_type() {
-        // Two subagents of the same type get distinct labels from their ids,
-        // which is the whole point of id-based tagging.
+    fn parse_subagents_id_suffix_distinguishes_uuid_v7_siblings() {
+        // UUIDv7 siblings share a timestamp-heavy prefix, so the trailing
+        // characters provide the useful compact discriminator.
         assert_eq!(
-            parse_subagents("Explore:aaaa1111,Explore:bbbb2222"),
-            vec!["Explore #aaaa", "Explore #bbbb"]
+            parse_subagents(
+                "general-purpose:01a0380d-9cc4-7312-a767-351c89120226,\
+                 general-purpose:01a0380d-9cc4-7312-a767-352dc72648cb"
+            ),
+            vec!["general-purpose #0226", "general-purpose #48cb"]
         );
     }
 
     #[test]
-    fn parse_subagents_id_shorter_than_prefix_len_uses_full_id() {
+    fn parse_subagents_id_shorter_than_tag_len_uses_full_id() {
         // Short ids (e.g. test fixtures like "s1") render in full rather
         // than being padded or truncated to nothing.
         assert_eq!(parse_subagents("Plan:s1"), vec!["Plan #s1"]);
@@ -770,7 +774,7 @@ mod tests {
         // falls back to the bare type name.
         assert_eq!(
             parse_subagents("Explore,Plan:sub-999"),
-            vec!["Explore", "Plan #sub-"]
+            vec!["Explore", "Plan #-999"]
         );
     }
 

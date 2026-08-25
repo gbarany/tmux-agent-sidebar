@@ -242,6 +242,7 @@ fn subagent_start() {
         AgentEvent::SubagentStart {
             agent_type: "Explore".into(),
             agent_id: None,
+            display_name: None,
         }
     );
 }
@@ -255,6 +256,7 @@ fn subagent_start_captures_agent_id() {
         AgentEvent::SubagentStart {
             agent_type: "Explore".into(),
             agent_id: Some("sub-42".into()),
+            display_name: None,
         }
     );
 }

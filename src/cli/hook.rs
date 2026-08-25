@@ -157,7 +157,13 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
         AgentEvent::SubagentStart {
             agent_type,
             agent_id,
-        } => handlers::on_subagent_start(pane, &agent_type, agent_id.as_deref()),
+            display_name,
+        } => handlers::on_subagent_start(
+            pane,
+            &agent_type,
+            display_name.as_deref(),
+            agent_id.as_deref(),
+        ),
         AgentEvent::SubagentStop {
             agent_id,
             children_may_outlive_turn,

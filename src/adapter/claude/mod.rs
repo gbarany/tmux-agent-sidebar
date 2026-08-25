@@ -231,6 +231,7 @@ impl EventAdapter for ClaudeAdapter {
                 Some(AgentEvent::SubagentStart {
                     agent_type: agent_type.into(),
                     agent_id: optional_str(input, "agent_id"),
+                    display_name: None,
                 })
             }
             "subagent-stop" => {

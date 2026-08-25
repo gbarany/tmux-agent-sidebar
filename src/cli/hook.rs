@@ -145,16 +145,24 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             cwd,
             permission_mode,
             prompt_id,
+            requires_existing_session,
             children_may_outlive_turn,
             worktree,
             session_id,
             ..
-        } => handlers::on_turn_settled(
-            pane,
-            &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
-            prompt_id.as_deref(),
-            children_may_outlive_turn,
-        ),
+        } => {
+            if requires_existing_session
+                && !context::pane_tracks_host_session(pane, &agent, session_id.as_deref())
+            {
+                return 0;
+            }
+            handlers::on_turn_settled(
+                pane,
+                &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
+                prompt_id.as_deref(),
+                children_may_outlive_turn,
+            )
+        }
         AgentEvent::StopFailure {
             agent,
             cwd,
@@ -426,6 +434,31 @@ mod tests {
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_AGENT));
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_STATUS));
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT));
+    }
+
+    #[test]
+    fn stale_grok_idle_notification_does_not_recreate_ended_session() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STALE_GROK_IDLE_NOTIFICATION";
+        let adapter = resolve_adapter("grok").unwrap();
+
+        handle_event(
+            pane,
+            "grok",
+            adapter
+                .parse(
+                    "turn-settled",
+                    &json!({
+                        "sessionId": "ended-session",
+                        "cwd": "/repo",
+                        "notificationType": "idle_prompt"
+                    }),
+                )
+                .unwrap(),
+        );
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_AGENT));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STATUS));
     }
 
     #[test]

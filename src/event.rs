@@ -92,6 +92,8 @@ pub enum AgentEvent {
         cwd: String,
         permission_mode: String,
         prompt_id: Option<String>,
+        /// Whether settlement must match the pane's tracked host session.
+        requires_existing_session: bool,
         /// Whether tracked children may continue after this parent turn ends.
         children_may_outlive_turn: bool,
         worktree: Option<WorktreeInfo>,

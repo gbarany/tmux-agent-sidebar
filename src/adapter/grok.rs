@@ -223,6 +223,7 @@ impl EventAdapter for GrokAdapter {
                 cwd: json_str(input, &["cwd"]).into(),
                 permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
                 prompt_id: optional_str(input, &["promptId", "prompt_id"]),
+                requires_existing_session: true,
                 children_may_outlive_turn: true,
                 worktree: None,
                 agent_id: None,
@@ -569,11 +570,13 @@ mod tests {
             AgentEvent::TurnSettled {
                 prompt_id,
                 session_id,
+                requires_existing_session,
                 children_may_outlive_turn,
                 ..
             } => {
                 assert!(prompt_id.is_none());
                 assert_eq!(session_id.as_deref(), Some("session-5"));
+                assert!(requires_existing_session);
                 assert!(children_may_outlive_turn);
             }
             other => panic!("expected TurnSettled, got {other:?}"),

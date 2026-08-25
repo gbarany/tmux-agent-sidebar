@@ -132,16 +132,20 @@ impl ClaudeAdapter {
 impl EventAdapter for ClaudeAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent> {
         match event_name {
-            "session-start" => Some(AgentEvent::SessionStart {
-                agent: CLAUDE_AGENT.into(),
-                cwd: json_str(input, "cwd").into(),
-                permission_mode: json_str(input, "permission_mode").into(),
-                source: json_str(input, "source").into(),
-                top_level: false,
-                worktree: parse_worktree(input),
-                agent_id: optional_str(input, "agent_id"),
-                session_id: optional_str(input, "session_id"),
-            }),
+            "session-start" => {
+                let agent_id = optional_str(input, "agent_id");
+                Some(AgentEvent::SessionStart {
+                    agent: CLAUDE_AGENT.into(),
+                    cwd: json_str(input, "cwd").into(),
+                    permission_mode: json_str(input, "permission_mode").into(),
+                    source: json_str(input, "source").into(),
+                    // Claude supplies agent_id only when this hook runs inside a subagent.
+                    top_level: agent_id.is_none(),
+                    worktree: parse_worktree(input),
+                    agent_id,
+                    session_id: optional_str(input, "session_id"),
+                })
+            }
             "session-end" => Some(AgentEvent::SessionEnd {
                 agent: CLAUDE_AGENT.into(),
                 session_id: optional_str(input, "session_id"),

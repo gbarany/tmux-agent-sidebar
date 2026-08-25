@@ -18,14 +18,12 @@ pub(in crate::cli::hook) fn on_session_start(
     source: &str,
     top_level: bool,
 ) -> i32 {
-    // A child SessionStart can share the parent's pane. Once SubagentStart has
-    // registered that child, any write here could reset the active parent turn.
-    if !top_level && !pane_writes_allowed(pane) {
+    // A child SessionStart shares the parent's pane and can race ahead of its
+    // SubagentStart registration, so it must never mutate parent-owned state.
+    if !top_level {
         return 0;
     }
-    if top_level {
-        tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
-    }
+    tmux::unset_pane_option(pane, tmux::PANE_SUBAGENTS);
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
     clear_run_state(pane);
@@ -268,6 +266,39 @@ mod tests {
                 tmux::test_mock::get(pane, key).as_deref(),
                 Some(expected),
                 "ambiguous child SessionStart changed parent-owned {key}"
+            );
+        }
+    }
+
+    #[test]
+    fn unregistered_child_session_start_preserves_parent_turn_state() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUBAGENT_START_RACE";
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "claude");
+        tmux::test_mock::set(pane, tmux::PANE_CWD, "/repo/parent");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "parent-session");
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT, "Parent request");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT_ID, "parent-prompt");
+        tmux::test_mock::set(pane, tmux::PANE_PROMPT_SOURCE, "user");
+
+        on_session_start(pane, &basic_ctx(), "startup", false);
+
+        for (key, expected) in [
+            (tmux::PANE_TURN_ACTIVE, "1"),
+            (tmux::PANE_AGENT, "claude"),
+            (tmux::PANE_CWD, "/repo/parent"),
+            (tmux::PANE_SESSION_ID, "parent-session"),
+            (tmux::PANE_STATUS, "running"),
+            (tmux::PANE_PROMPT, "Parent request"),
+            (tmux::PANE_PROMPT_ID, "parent-prompt"),
+            (tmux::PANE_PROMPT_SOURCE, "user"),
+        ] {
+            assert_eq!(
+                tmux::test_mock::get(pane, key).as_deref(),
+                Some(expected),
+                "unregistered child SessionStart changed parent-owned {key}"
             );
         }
     }

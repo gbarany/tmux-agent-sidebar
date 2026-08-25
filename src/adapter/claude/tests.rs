@@ -18,7 +18,7 @@ fn session_start() {
             cwd: "/home/user".into(),
             permission_mode: "default".into(),
             source: "".into(),
-            top_level: false,
+            top_level: true,
             worktree: None,
             agent_id: None,
             session_id: None,
@@ -699,7 +699,10 @@ fn session_start_with_worktree_and_agent_id() {
     let event = adapter.parse("session-start", &input).unwrap();
     match event {
         AgentEvent::SessionStart {
-            worktree, agent_id, ..
+            worktree,
+            agent_id,
+            top_level,
+            ..
         } => {
             let wt = worktree.unwrap();
             assert_eq!(wt.name, "feat-wt");
@@ -707,6 +710,7 @@ fn session_start_with_worktree_and_agent_id() {
             assert_eq!(wt.branch, "feat");
             assert_eq!(wt.original_repo_dir, "/home/user/repo");
             assert_eq!(agent_id.unwrap(), "abc-123");
+            assert!(!top_level);
         }
         _ => panic!("wrong variant"),
     }
@@ -827,7 +831,7 @@ fn session_start_missing_fields_default_to_empty() {
             cwd: "".into(),
             permission_mode: "".into(),
             source: "".into(),
-            top_level: false,
+            top_level: true,
             worktree: None,
             agent_id: None,
             session_id: None,

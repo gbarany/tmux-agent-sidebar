@@ -156,7 +156,9 @@ fn copy_key(map: &mut Map<String, Value>, source: &str, destination: &str) {
 impl EventAdapter for GrokAdapter {
     fn parse(&self, event_name: &str, input: &Value) -> Option<AgentEvent> {
         match event_name {
-            "session-start" if !is_subagent_event(input) => Some(AgentEvent::SessionStart {
+            // Grok dispatches SessionStart only from the top-level agent path;
+            // its typed SessionStart payload has no subagent identity field.
+            "session-start" => Some(AgentEvent::SessionStart {
                 agent: GROK_AGENT.into(),
                 cwd: json_str(input, &["cwd"]).into(),
                 permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
@@ -193,10 +195,7 @@ impl EventAdapter for GrokAdapter {
                 agent_id: None,
                 session_id: optional_str(input, &["sessionId", "session_id"]),
             }),
-            "stop"
-                if !is_subagent_event(input)
-                    && !matches!(json_str(input, &["reason"]), "channel_closed" | "shutdown") =>
-            {
+            "stop" if !matches!(json_str(input, &["reason"]), "channel_closed" | "shutdown") => {
                 Some(AgentEvent::Stop {
                     agent: GROK_AGENT.into(),
                     cwd: json_str(input, &["cwd"]).into(),
@@ -258,10 +257,10 @@ impl EventAdapter for GrokAdapter {
                 if agent_type.is_empty() {
                     return None;
                 }
+                let agent_id = optional_str(input, &["subagentId", "subagent_id"])?;
                 Some(AgentEvent::SubagentStart {
                     agent_type: agent_type.into(),
-                    agent_id: optional_str(input, &["subagentId", "subagent_id"])
-                        .or_else(|| Some(agent_type.to_string())),
+                    agent_id: Some(agent_id),
                     display_name: optional_str(input, &["description"]),
                 })
             }
@@ -270,10 +269,10 @@ impl EventAdapter for GrokAdapter {
                 if agent_type.is_empty() {
                     return None;
                 }
+                let agent_id = optional_str(input, &["subagentId", "subagent_id"])?;
                 Some(AgentEvent::SubagentStop {
                     agent_type: agent_type.into(),
-                    agent_id: optional_str(input, &["subagentId", "subagent_id"])
-                        .or_else(|| Some(agent_type.to_string())),
+                    agent_id: Some(agent_id),
                     last_message: json_str(
                         input,
                         &["lastAssistantMessage", "last_assistant_message"],
@@ -422,22 +421,6 @@ mod tests {
     }
 
     #[test]
-    fn child_session_start_does_not_reset_host_session() {
-        assert!(
-            GrokAdapter
-                .parse(
-                    "session-start",
-                    &json!({
-                        "cwd": "/repo",
-                        "permissionMode": "auto",
-                        "subagentType": "explore"
-                    })
-                )
-                .is_none()
-        );
-    }
-
-    #[test]
     fn agent_type_is_harness_metadata_not_subagent_identity() {
         let event = GrokAdapter
             .parse(
@@ -496,15 +479,13 @@ mod tests {
     }
 
     #[test]
-    fn child_turn_end_does_not_settle_host_session() {
-        for event_name in ["stop", "stop-failure"] {
-            assert!(
-                GrokAdapter
-                    .parse(event_name, &json!({"subagentType": "explore"}))
-                    .is_none(),
-                "{event_name} from a child must be ignored"
-            );
-        }
+    fn child_stop_failure_does_not_settle_host_session() {
+        assert!(
+            GrokAdapter
+                .parse("stop-failure", &json!({"subagentType": "explore"}))
+                .is_none(),
+            "StopFailure from a child must be ignored"
+        );
     }
 
     #[test]
@@ -664,6 +645,18 @@ mod tests {
     }
 
     #[test]
+    fn subagent_lifecycle_requires_documented_id() {
+        for event_name in ["subagent-start", "subagent-stop"] {
+            assert!(
+                GrokAdapter
+                    .parse(event_name, &json!({"subagentType": "explore"}))
+                    .is_none(),
+                "{event_name} must not invent a missing subagentId"
+            );
+        }
+    }
+
+    #[test]
     fn claude_only_field_names_are_not_treated_as_grok_payloads() {
         assert_eq!(
             GrokAdapter.parse("session-end", &json!({"endReason": "shutdown"})),
@@ -681,16 +674,13 @@ mod tests {
             AgentEvent::Notification { wait_reason, .. } if wait_reason.is_empty()
         ));
 
-        assert_eq!(
-            GrokAdapter.parse(
-                "subagent-start",
-                &json!({"agentId": "claude-child", "subagentType": "explore"}),
-            ),
-            Some(AgentEvent::SubagentStart {
-                agent_type: "explore".into(),
-                agent_id: Some("explore".into()),
-                display_name: None,
-            })
+        assert!(
+            GrokAdapter
+                .parse(
+                    "subagent-start",
+                    &json!({"agentId": "claude-child", "subagentType": "explore"}),
+                )
+                .is_none()
         );
 
         let activity = GrokAdapter

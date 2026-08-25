@@ -46,7 +46,7 @@ pub(crate) fn minimal_payload(agent: &str, kind: AgentEventKind) -> serde_json::
     match kind {
         AgentEventKind::ActivityLog => json!({"tool_name": "Read"}),
         AgentEventKind::SubagentStart | AgentEventKind::SubagentStop if agent == "grok" => {
-            json!({"subagentType": "Explore"})
+            json!({"subagentId": "subagent-1", "subagentType": "Explore"})
         }
         AgentEventKind::SubagentStart | AgentEventKind::SubagentStop => {
             json!({"agent_type": "Explore"})

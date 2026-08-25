@@ -92,6 +92,17 @@ fn optional_str(input: &Value, keys: &[&str]) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
+fn extract_user_query(raw: &str) -> String {
+    let trimmed = raw.trim();
+    let Some(after_open) = trimmed.strip_prefix("<user_query>") else {
+        return raw.to_string();
+    };
+    let Some(close) = after_open.rfind("</user_query>") else {
+        return raw.to_string();
+    };
+    after_open[..close].trim().to_string()
+}
+
 fn is_subagent_event(input: &Value) -> bool {
     !json_str(input, &["subagentType", "subagent_type"]).is_empty()
 }
@@ -163,7 +174,7 @@ impl EventAdapter for GrokAdapter {
                     agent: GROK_AGENT.into(),
                     cwd: json_str(input, &["cwd"]).into(),
                     permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
-                    prompt: json_str(input, &["prompt"]).into(),
+                    prompt: extract_user_query(json_str(input, &["prompt"])),
                     prompt_id: optional_str(input, &["promptId", "prompt_id"]),
                     worktree: None,
                     agent_id: None,
@@ -324,6 +335,57 @@ mod tests {
                 session_id: Some("session-2".into()),
             }
         );
+    }
+
+    #[test]
+    fn user_prompt_submit_extracts_query_from_grok_prompt_envelope() {
+        let cases = [
+            ("<user_query> ok go </user_query>", "ok go"),
+            (
+                "<user_query>\nfix the tests\nand update the docs\n</user_query>",
+                "fix the tests\nand update the docs",
+            ),
+            (
+                "<user_query>\nexplain <example>this XML</example>\n</user_query>\n\
+                 <skill_information>internal instructions</skill_information>\n\n\
+                 <system-reminder><attached_files>context</attached_files></system-reminder>",
+                "explain <example>this XML</example>",
+            ),
+            (
+                "<user_query>\nexplain the literal </user_query> token\n</user_query>",
+                "explain the literal </user_query> token",
+            ),
+        ];
+
+        for (prompt, expected) in cases {
+            let event = GrokAdapter
+                .parse("user-prompt-submit", &json!({"prompt": prompt}))
+                .unwrap();
+            assert!(
+                matches!(event, AgentEvent::UserPromptSubmit { prompt, .. } if prompt == expected),
+                "failed to extract Grok query from {prompt:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn user_prompt_submit_preserves_non_envelope_xml() {
+        let cases = [
+            "plain prompt",
+            "explain <user_query>this example</user_query>",
+            "<user_query>unfinished",
+            "<system-reminder>literal user-authored example</system-reminder>",
+        ];
+
+        for prompt in cases {
+            let event = GrokAdapter
+                .parse("user-prompt-submit", &json!({"prompt": prompt}))
+                .unwrap();
+            assert!(
+                matches!(event, AgentEvent::UserPromptSubmit { prompt: actual, .. } if actual == prompt),
+                "changed non-envelope prompt {prompt:?}"
+            );
+        }
     }
 
     #[test]

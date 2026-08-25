@@ -87,6 +87,7 @@ impl EventAdapter for OpenCodeAdapter {
                 permission_mode: String::new(),
                 wait_reason: json_str(input, "wait_reason").into(),
                 meta_only: false,
+                requires_existing_session: false,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, "session_id"),

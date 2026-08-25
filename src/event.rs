@@ -57,6 +57,9 @@ pub enum AgentEvent {
         /// Used for events like idle_prompt that carry metadata but should not
         /// trigger a visible status change.
         meta_only: bool,
+        /// Whether this event must match an already-tracked pane session
+        /// before it may apply metadata or attention state.
+        requires_existing_session: bool,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
         session_id: Option<String>,

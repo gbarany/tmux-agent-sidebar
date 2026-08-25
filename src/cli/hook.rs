@@ -84,6 +84,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             permission_mode,
             wait_reason,
             meta_only,
+            requires_existing_session,
             worktree,
             session_id,
             ..
@@ -94,6 +95,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
                 &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
                 &wait_reason,
                 meta_only,
+                requires_existing_session,
                 &notifications,
             )
         }

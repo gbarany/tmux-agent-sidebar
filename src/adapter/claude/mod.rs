@@ -165,6 +165,7 @@ impl EventAdapter for ClaudeAdapter {
                     permission_mode: json_str(input, "permission_mode").into(),
                     wait_reason: wait_reason.into(),
                     meta_only,
+                    requires_existing_session: false,
                     worktree: parse_worktree(input),
                     agent_id: optional_str(input, "agent_id"),
                     session_id: optional_str(input, "session_id"),

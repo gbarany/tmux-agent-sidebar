@@ -188,6 +188,7 @@ impl EventAdapter for GrokAdapter {
                 permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
                 wait_reason: json_str(input, &["notificationType", "notification_type"]).into(),
                 meta_only: false,
+                requires_existing_session: true,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, &["sessionId", "session_id"]),
@@ -542,11 +543,13 @@ mod tests {
                 agent,
                 wait_reason,
                 meta_only,
+                requires_existing_session,
                 ..
             } => {
                 assert_eq!(agent, GROK_AGENT);
                 assert_eq!(wait_reason, "permission_prompt");
                 assert!(!meta_only);
+                assert!(requires_existing_session);
             }
             other => panic!("expected Notification, got {other:?}"),
         }

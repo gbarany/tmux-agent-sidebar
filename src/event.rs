@@ -79,6 +79,8 @@ pub enum AgentEvent {
         last_message: String,
         response: Option<String>,
         prompt_id: Option<String>,
+        /// Whether this stop must match the pane's tracked host session.
+        requires_existing_session: bool,
         /// Whether tracked children may continue after this parent turn ends.
         children_may_outlive_turn: bool,
         worktree: Option<WorktreeInfo>,
@@ -106,6 +108,8 @@ pub enum AgentEvent {
         permission_mode: String,
         error: String,
         prompt_id: Option<String>,
+        /// Whether this failure must match the pane's tracked host session.
+        requires_existing_session: bool,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
         session_id: Option<String>,

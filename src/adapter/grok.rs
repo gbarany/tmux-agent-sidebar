@@ -212,6 +212,7 @@ impl EventAdapter for GrokAdapter {
                     .into(),
                     response: None,
                     prompt_id: optional_str(input, &["promptId", "prompt_id"]),
+                    requires_existing_session: true,
                     children_may_outlive_turn: true,
                     worktree: None,
                     agent_id: None,
@@ -245,6 +246,7 @@ impl EventAdapter for GrokAdapter {
                 )
                 .into(),
                 prompt_id: optional_str(input, &["promptId", "prompt_id"]),
+                requires_existing_session: true,
                 worktree: None,
                 agent_id: None,
                 session_id: optional_str(input, &["sessionId", "session_id"]),
@@ -481,6 +483,7 @@ mod tests {
                 response,
                 prompt_id,
                 session_id,
+                requires_existing_session,
                 children_may_outlive_turn,
                 ..
             } => {
@@ -489,6 +492,7 @@ mod tests {
                 assert!(response.is_none(), "Grok Stop must emit no decision output");
                 assert_eq!(prompt_id.as_deref(), Some("prompt-3"));
                 assert_eq!(session_id.as_deref(), Some("session-3"));
+                assert!(requires_existing_session);
                 assert!(children_may_outlive_turn);
             }
             other => panic!("expected Stop, got {other:?}"),
@@ -513,14 +517,22 @@ mod tests {
                 &json!({
                     "error": "rate_limit",
                     "errorDetails": "capacity temporarily unavailable",
-                    "lastAssistantMessage": "request failed"
+                    "lastAssistantMessage": "request failed",
+                    "sessionId": "session-failure"
                 }),
             )
             .unwrap();
 
         match event {
-            AgentEvent::StopFailure { error, .. } => {
-                assert_eq!(error, "capacity temporarily unavailable")
+            AgentEvent::StopFailure {
+                error,
+                session_id,
+                requires_existing_session,
+                ..
+            } => {
+                assert_eq!(error, "capacity temporarily unavailable");
+                assert_eq!(session_id.as_deref(), Some("session-failure"));
+                assert!(requires_existing_session);
             }
             other => panic!("expected StopFailure, got {other:?}"),
         }

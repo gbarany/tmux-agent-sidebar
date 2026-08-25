@@ -124,11 +124,17 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             last_message,
             response,
             prompt_id,
+            requires_existing_session,
             children_may_outlive_turn,
             worktree,
             session_id,
             ..
         } => {
+            if requires_existing_session
+                && !context::pane_tracks_host_session(pane, &agent, session_id.as_deref())
+            {
+                return 0;
+            }
             let notifications = notification_settings();
             handlers::on_stop(
                 pane,
@@ -169,10 +175,16 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             permission_mode,
             error,
             prompt_id,
+            requires_existing_session,
             worktree,
             session_id,
             ..
         } => {
+            if requires_existing_session
+                && !context::pane_tracks_host_session(pane, &agent, session_id.as_deref())
+            {
+                return 0;
+            }
             let notifications = notification_settings();
             handlers::on_stop_failure(
                 pane,
@@ -459,6 +471,58 @@ mod tests {
 
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_AGENT));
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_STATUS));
+    }
+
+    #[test]
+    fn stale_grok_stop_failure_does_not_recreate_ended_session() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STALE_GROK_STOP_FAILURE";
+        let adapter = resolve_adapter("grok").unwrap();
+
+        handle_event(
+            pane,
+            "grok",
+            adapter
+                .parse(
+                    "stop-failure",
+                    &json!({
+                        "sessionId": "ended-session",
+                        "cwd": "/repo",
+                        "errorDetails": "late failure"
+                    }),
+                )
+                .unwrap(),
+        );
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_AGENT));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STATUS));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON));
+    }
+
+    #[test]
+    fn stale_grok_stop_does_not_recreate_ended_session() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STALE_GROK_STOP";
+        let adapter = resolve_adapter("grok").unwrap();
+
+        handle_event(
+            pane,
+            "grok",
+            adapter
+                .parse(
+                    "stop",
+                    &json!({
+                        "sessionId": "ended-session",
+                        "cwd": "/repo",
+                        "lastAssistantMessage": "late response"
+                    }),
+                )
+                .unwrap(),
+        );
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_AGENT));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STATUS));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT));
     }
 
     #[test]

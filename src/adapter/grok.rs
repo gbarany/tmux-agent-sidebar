@@ -169,6 +169,9 @@ impl EventAdapter for GrokAdapter {
                 session_id: optional_str(input, &["sessionId", "session_id"]),
             }),
             "session-end" if !is_subagent_event(input) => Some(AgentEvent::SessionEnd {
+                agent: GROK_AGENT.into(),
+                session_id: optional_str(input, &["sessionId", "session_id"]),
+                requires_existing_session: true,
                 end_reason: json_str(input, &["reason"]).into(),
                 top_level: true,
             }),
@@ -178,6 +181,8 @@ impl EventAdapter for GrokAdapter {
                     cwd: json_str(input, &["cwd"]).into(),
                     permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
                     prompt: extract_user_query(json_str(input, &["prompt"])),
+                    prompt_is_system_message: false,
+                    requires_existing_session: true,
                     prompt_id: optional_str(input, &["promptId", "prompt_id"]),
                     worktree: None,
                     agent_id: None,
@@ -259,6 +264,9 @@ impl EventAdapter for GrokAdapter {
                 }
                 let agent_id = optional_str(input, &["subagentId", "subagent_id"])?;
                 Some(AgentEvent::SubagentStart {
+                    agent: GROK_AGENT.into(),
+                    session_id: optional_str(input, &["sessionId", "session_id"]),
+                    requires_existing_session: true,
                     agent_type: agent_type.into(),
                     agent_id: Some(agent_id),
                     display_name: optional_str(input, &["description"]),
@@ -338,6 +346,8 @@ mod tests {
                 cwd: "/repo".into(),
                 permission_mode: "plan".into(),
                 prompt: "fix the tests".into(),
+                prompt_is_system_message: false,
+                requires_existing_session: true,
                 prompt_id: Some("prompt-2".into()),
                 worktree: None,
                 agent_id: None,
@@ -400,8 +410,14 @@ mod tests {
     #[test]
     fn session_end_reads_reason() {
         assert_eq!(
-            GrokAdapter.parse("session-end", &json!({"reason": "shutdown"})),
+            GrokAdapter.parse(
+                "session-end",
+                &json!({"sessionId": "host-session", "reason": "shutdown"}),
+            ),
             Some(AgentEvent::SessionEnd {
+                agent: GROK_AGENT.into(),
+                session_id: Some("host-session".into()),
+                requires_existing_session: true,
                 end_reason: "shutdown".into(),
                 top_level: true,
             })
@@ -614,10 +630,14 @@ mod tests {
                     "subagentId": "subagent-1",
                     "subagentType": "explore",
                     "description": "Review error handling",
+                    "sessionId": "host-session",
                     "promptId": "child-turn-1"
                 }),
             ),
             Some(AgentEvent::SubagentStart {
+                agent: GROK_AGENT.into(),
+                session_id: Some("host-session".into()),
+                requires_existing_session: true,
                 agent_type: "explore".into(),
                 agent_id: Some("subagent-1".into()),
                 display_name: Some("Review error handling".into()),
@@ -661,6 +681,9 @@ mod tests {
         assert_eq!(
             GrokAdapter.parse("session-end", &json!({"endReason": "shutdown"})),
             Some(AgentEvent::SessionEnd {
+                agent: GROK_AGENT.into(),
+                session_id: None,
+                requires_existing_session: true,
                 end_reason: "".into(),
                 top_level: true,
             })

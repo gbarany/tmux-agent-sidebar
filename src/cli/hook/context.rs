@@ -9,7 +9,7 @@ pub(super) use labels::{
 };
 pub(super) use location::{pane_writes_allowed, sync_pane_location};
 pub(super) use meta::{
-    AgentContext, clear_run_state, is_system_message, make_ctx, mark_task_reset,
+    AgentContext, clear_run_state, make_ctx, mark_task_reset, pane_tracks_host_session,
     pane_tracks_session, set_agent_meta,
 };
 pub(super) use pending::{

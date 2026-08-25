@@ -53,27 +53,35 @@ pub(in crate::cli::hook) fn pane_tracks_session(
     if tmux::get_pane_option_value(pane, tmux::PANE_AGENT) != agent {
         return false;
     }
+    // Grok child hook envelopes use the child session id created from the
+    // SubagentStart subagent id, so either tracked identity is current.
+    if pane_tracks_host_session(pane, agent, session_id) {
+        return true;
+    }
     let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
         return false;
     };
+    contains_subagent(
+        &tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS),
+        session_id,
+    )
+}
 
-    // Grok child hook envelopes use the child session id created from the
-    // SubagentStart subagent id, so either tracked identity is current.
-    tmux::get_pane_option_value(pane, tmux::PANE_SESSION_ID) == session_id
-        || contains_subagent(
-            &tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS),
-            session_id,
-        )
+pub(in crate::cli::hook) fn pane_tracks_host_session(
+    pane: &str,
+    agent: &str,
+    session_id: Option<&str>,
+) -> bool {
+    let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
+        return false;
+    };
+    tmux::get_pane_option_value(pane, tmux::PANE_AGENT) == agent
+        && tmux::get_pane_option_value(pane, tmux::PANE_SESSION_ID) == session_id
 }
 
 pub(in crate::cli::hook) fn clear_run_state(pane: &str) {
     tmux::unset_pane_option(pane, tmux::PANE_STARTED_AT);
     tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
-}
-
-/// Check if a prompt is a system-injected message (not a real user prompt).
-pub(in crate::cli::hook) fn is_system_message(s: &str) -> bool {
-    s.contains("<task-notification>") || s.contains("<system-reminder>") || s.contains("<task-")
 }
 
 pub(in crate::cli::hook) fn clear_all_meta(pane: &str) {
@@ -183,44 +191,6 @@ mod tests {
         assert!(!path.exists(), "log file created while subagents active");
     }
 
-    // ─── is_system_message ────────────────────────────────────────
-
-    #[test]
-    fn system_message_task_notification() {
-        assert!(is_system_message(
-            "<task-notification><task-id>abc</task-id></task-notification>"
-        ));
-    }
-
-    #[test]
-    fn system_message_system_reminder() {
-        assert!(is_system_message(
-            "<system-reminder>some reminder</system-reminder>"
-        ));
-    }
-
-    #[test]
-    fn system_message_task_prefix() {
-        assert!(is_system_message("<task-id>abc</task-id>"));
-    }
-
-    #[test]
-    fn system_message_normal_prompt() {
-        assert!(!is_system_message("fix the bug"));
-    }
-
-    #[test]
-    fn system_message_empty() {
-        assert!(!is_system_message(""));
-    }
-
-    #[test]
-    fn system_message_mixed_content() {
-        assert!(is_system_message(
-            "hello <system-reminder>noise</system-reminder> world"
-        ));
-    }
-
     // ─── set_agent_meta ────────────────────────────────────────────
 
     #[test]
@@ -281,6 +251,23 @@ mod tests {
 
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON));
+    }
+
+    #[test]
+    fn host_session_match_excludes_tracked_children() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%HOST_ONLY_SESSION";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "grok");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "host-session");
+        tmux::test_mock::set(pane, tmux::PANE_SUBAGENTS, "Review:child-session");
+
+        assert!(pane_tracks_host_session(pane, "grok", Some("host-session")));
+        assert!(!pane_tracks_host_session(
+            pane,
+            "grok",
+            Some("child-session")
+        ));
+        assert!(pane_tracks_session(pane, "grok", Some("child-session")));
     }
 
     #[test]

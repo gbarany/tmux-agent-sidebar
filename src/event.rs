@@ -33,6 +33,10 @@ pub enum AgentEvent {
         session_id: Option<String>,
     },
     SessionEnd {
+        agent: String,
+        session_id: Option<String>,
+        /// Whether teardown must match the pane's currently tracked host session.
+        requires_existing_session: bool,
         end_reason: String,
         /// Whether the adapter guarantees this belongs to the pane's host
         /// session rather than a child sharing the same `$TMUX_PANE`.
@@ -43,6 +47,10 @@ pub enum AgentEvent {
         cwd: String,
         permission_mode: String,
         prompt: String,
+        /// Adapter-normalized classification for harness-injected prompt text.
+        prompt_is_system_message: bool,
+        /// Whether this prompt must match an already-tracked host session.
+        requires_existing_session: bool,
         prompt_id: Option<String>,
         worktree: Option<WorktreeInfo>,
         agent_id: Option<String>,
@@ -101,6 +109,10 @@ pub enum AgentEvent {
         session_id: Option<String>,
     },
     SubagentStart {
+        agent: String,
+        session_id: Option<String>,
+        /// Whether the child may be registered only while its host is tracked.
+        requires_existing_session: bool,
         agent_type: String,
         agent_id: Option<String>,
         /// Optional human-readable identity supplied separately from the type.

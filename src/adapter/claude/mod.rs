@@ -2,7 +2,7 @@ use crate::event::{AgentEvent, AgentEventKind, EventAdapter, WorktreeInfo};
 use crate::tmux::CLAUDE_AGENT;
 use serde_json::Value;
 
-use super::{HookRegistration, json_str};
+use super::{HookRegistration, is_system_message, json_str};
 
 /// Parse optional worktree object from hook payload.
 /// Returns None if the "worktree" field is missing or not an object.
@@ -143,6 +143,9 @@ impl EventAdapter for ClaudeAdapter {
                 session_id: optional_str(input, "session_id"),
             }),
             "session-end" => Some(AgentEvent::SessionEnd {
+                agent: CLAUDE_AGENT.into(),
+                session_id: optional_str(input, "session_id"),
+                requires_existing_session: false,
                 end_reason: json_str(input, "end_reason").into(),
                 top_level: false,
             }),
@@ -151,6 +154,8 @@ impl EventAdapter for ClaudeAdapter {
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 prompt: json_str(input, "prompt").into(),
+                prompt_is_system_message: is_system_message(json_str(input, "prompt")),
+                requires_existing_session: false,
                 prompt_id: None,
                 worktree: parse_worktree(input),
                 agent_id: optional_str(input, "agent_id"),
@@ -231,6 +236,9 @@ impl EventAdapter for ClaudeAdapter {
                     return None;
                 }
                 Some(AgentEvent::SubagentStart {
+                    agent: CLAUDE_AGENT.into(),
+                    session_id: optional_str(input, "session_id"),
+                    requires_existing_session: false,
                     agent_type: agent_type.into(),
                     agent_id: optional_str(input, "agent_id"),
                     display_name: None,

@@ -2,7 +2,7 @@ use crate::event::{AgentEvent, AgentEventKind, EventAdapter};
 use crate::tmux::CODEX_AGENT;
 use serde_json::Value;
 
-use super::{HookRegistration, json_str, json_value_or_null, optional_str};
+use super::{HookRegistration, is_system_message, json_str, json_value_or_null, optional_str};
 
 pub struct CodexAdapter;
 
@@ -60,6 +60,8 @@ impl EventAdapter for CodexAdapter {
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: json_str(input, "permission_mode").into(),
                 prompt: json_str(input, "prompt").into(),
+                prompt_is_system_message: is_system_message(json_str(input, "prompt")),
+                requires_existing_session: false,
                 prompt_id: None,
                 worktree: None,
                 agent_id: None,
@@ -148,6 +150,8 @@ mod tests {
                 cwd: "/tmp".into(),
                 permission_mode: "".into(),
                 prompt: "hello".into(),
+                prompt_is_system_message: false,
+                requires_existing_session: false,
                 prompt_id: None,
                 worktree: None,
                 agent_id: None,

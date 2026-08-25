@@ -32,6 +32,9 @@ mod tests {
         assert_eq!(
             event,
             Some(AgentEvent::SessionEnd {
+                agent: "claude".into(),
+                session_id: None,
+                requires_existing_session: false,
                 end_reason: "".into(),
                 top_level: false,
             })
@@ -155,6 +158,31 @@ mod tests {
     }
 
     #[test]
+    fn adapters_normalize_prompt_system_classification() {
+        for (agent_name, expected) in [
+            ("claude", true),
+            ("codex", true),
+            ("opencode", true),
+            ("grok", false),
+        ] {
+            let event = resolve_adapter(agent_name)
+                .unwrap()
+                .parse(
+                    "user-prompt-submit",
+                    &json!({"prompt": "explain <system-reminder>this tag</system-reminder>"}),
+                )
+                .unwrap();
+            assert!(matches!(
+                event,
+                AgentEvent::UserPromptSubmit {
+                    prompt_is_system_message,
+                    ..
+                } if prompt_is_system_message == expected
+            ));
+        }
+    }
+
+    #[test]
     fn claude_stop_has_no_response() {
         let adapter = resolve_adapter("claude").unwrap();
         let event = adapter.parse("stop", &json!({})).unwrap();
@@ -270,6 +298,9 @@ mod tests {
         assert_eq!(
             claude.parse("session-end", &json!({})),
             Some(AgentEvent::SessionEnd {
+                agent: "claude".into(),
+                session_id: None,
+                requires_existing_session: false,
                 end_reason: "".into(),
                 top_level: false,
             }),

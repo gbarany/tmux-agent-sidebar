@@ -47,6 +47,9 @@ fn session_end() {
     assert_eq!(
         adapter.parse("session-end", &json!({})).unwrap(),
         AgentEvent::SessionEnd {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             end_reason: "".into(),
             top_level: false,
         }
@@ -62,6 +65,9 @@ fn session_end_captures_reason() {
     assert_eq!(
         event,
         AgentEvent::SessionEnd {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             end_reason: "logout".into(),
             top_level: false,
         }
@@ -80,6 +86,8 @@ fn user_prompt_submit() {
             cwd: "/tmp".into(),
             permission_mode: "auto".into(),
             prompt: "fix bug".into(),
+            prompt_is_system_message: false,
+            requires_existing_session: false,
             prompt_id: None,
             worktree: None,
             agent_id: None,
@@ -242,6 +250,9 @@ fn subagent_start() {
     assert_eq!(
         adapter.parse("subagent-start", &input).unwrap(),
         AgentEvent::SubagentStart {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             agent_type: "Explore".into(),
             agent_id: None,
             display_name: None,
@@ -256,6 +267,9 @@ fn subagent_start_captures_agent_id() {
     assert_eq!(
         adapter.parse("subagent-start", &input).unwrap(),
         AgentEvent::SubagentStart {
+            agent: "claude".into(),
+            session_id: None,
+            requires_existing_session: false,
             agent_type: "Explore".into(),
             agent_id: Some("sub-42".into()),
             display_name: None,

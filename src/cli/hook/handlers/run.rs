@@ -5,9 +5,7 @@ use crate::tmux;
 
 use crate::time::now_epoch_secs;
 
-use super::super::context::{
-    AgentContext, clear_run_state, is_system_message, mark_task_reset, set_agent_meta,
-};
+use super::super::context::{AgentContext, clear_run_state, mark_task_reset, set_agent_meta};
 use super::super::notifications::{
     NotifyLabels, NotifyPayload, notify_lifecycle, notify_stop, set_notification_run_id, stop_body,
     stop_failure_body, stop_failure_fingerprint, task_completed_body, task_completed_fingerprint,
@@ -18,13 +16,14 @@ pub(in crate::cli::hook) fn on_user_prompt_submit(
     pane: &str,
     ctx: &AgentContext<'_>,
     prompt: &str,
+    prompt_is_system_message: bool,
     prompt_id: Option<&str>,
 ) -> i32 {
     set_agent_meta(pane, ctx);
     set_attention(pane, "clear");
     set_status(pane, "running");
     set_notification_run_id(pane);
-    if !prompt.is_empty() && !is_system_message(prompt) {
+    if !prompt.is_empty() && !prompt_is_system_message {
         let p = sanitize_tmux_value(prompt);
         tmux::set_pane_option(pane, tmux::PANE_PROMPT, &p);
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "user");
@@ -254,7 +253,7 @@ mod tests {
             worktree: &None,
             session_id: &None,
         };
-        let exit = on_user_prompt_submit(pane, &ctx, "fix the bug", None);
+        let exit = on_user_prompt_submit(pane, &ctx, "fix the bug", false, None);
         assert_eq!(exit, 0);
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
@@ -286,6 +285,7 @@ mod tests {
             pane,
             &ctx,
             "<system-reminder>ignore me</system-reminder>",
+            true,
             None,
         );
         assert!(
@@ -312,7 +312,7 @@ mod tests {
             worktree: &None,
             session_id: &None,
         };
-        on_user_prompt_submit(pane, &ctx, "new prompt", None);
+        on_user_prompt_submit(pane, &ctx, "new prompt", false, None);
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON));
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_BG_CMD).as_deref(),
@@ -486,7 +486,7 @@ mod tests {
             session_id: &None,
         };
 
-        on_user_prompt_submit(pane, &ctx, "new turn", Some("prompt-new"));
+        on_user_prompt_submit(pane, &ctx, "new turn", false, Some("prompt-new"));
 
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_PROMPT_ID).as_deref(),
@@ -509,7 +509,7 @@ mod tests {
             worktree: &None,
             session_id: &None,
         };
-        on_user_prompt_submit(pane, &ctx, "new", Some("prompt 1"));
+        on_user_prompt_submit(pane, &ctx, "new", false, Some("prompt 1"));
         assert!(!turn_end_is_current(pane, Some("prompt|1")));
 
         on_turn_settled(pane, &ctx, Some("prompt|1"), true);
@@ -531,7 +531,7 @@ mod tests {
             worktree: &None,
             session_id: &None,
         };
-        on_user_prompt_submit(pane, &ctx, "cancel me", Some("prompt-1"));
+        on_user_prompt_submit(pane, &ctx, "cancel me", false, Some("prompt-1"));
         on_turn_settled(pane, &ctx, Some("prompt-1"), true);
 
         assert_eq!(
@@ -757,7 +757,7 @@ mod tests {
             events: Default::default(),
         };
 
-        on_user_prompt_submit(pane, &ctx, "new turn", Some("prompt-new"));
+        on_user_prompt_submit(pane, &ctx, "new turn", false, Some("prompt-new"));
         on_stop(
             pane,
             &ctx,
@@ -802,7 +802,7 @@ mod tests {
             events: Default::default(),
         };
 
-        on_user_prompt_submit(pane, &ctx, "turn", Some("prompt-1"));
+        on_user_prompt_submit(pane, &ctx, "turn", false, Some("prompt-1"));
         on_stop(
             pane,
             &ctx,
@@ -841,7 +841,7 @@ mod tests {
             events: Default::default(),
         };
 
-        on_user_prompt_submit(pane, &ctx, "current idless turn", None);
+        on_user_prompt_submit(pane, &ctx, "current idless turn", false, None);
         on_stop(
             pane,
             &ctx,
@@ -891,7 +891,7 @@ mod tests {
             events: Default::default(),
         };
 
-        on_user_prompt_submit(pane, &old_ctx, "old prompt", Some("prompt-old"));
+        on_user_prompt_submit(pane, &old_ctx, "old prompt", false, Some("prompt-old"));
         on_session_start(pane, &new_ctx, "clear", true);
         on_stop(
             pane,
@@ -944,7 +944,7 @@ mod tests {
             events: Default::default(),
         };
 
-        on_user_prompt_submit(pane, &old_ctx, "old prompt", Some("prompt-old"));
+        on_user_prompt_submit(pane, &old_ctx, "old prompt", false, Some("prompt-old"));
         on_session_start(pane, &new_ctx, "clear", true);
         on_stop_failure(
             pane,
@@ -982,7 +982,13 @@ mod tests {
             session_id: &None,
         };
 
-        on_user_prompt_submit(pane, &ctx, "turn missing its end report", Some("prompt-1"));
+        on_user_prompt_submit(
+            pane,
+            &ctx,
+            "turn missing its end report",
+            false,
+            Some("prompt-1"),
+        );
         on_turn_settled(pane, &ctx, None, true);
 
         assert_eq!(

@@ -4,7 +4,7 @@ use crate::event::{AgentEvent, EventAdapter};
 use crate::tmux::OPENCODE_AGENT;
 use crate::tool_name::CanonicalTool;
 
-use super::{json_str, json_value_or_null, optional_str};
+use super::{is_system_message, json_str, json_value_or_null, optional_str};
 
 pub struct OpenCodeAdapter;
 
@@ -76,6 +76,8 @@ impl EventAdapter for OpenCodeAdapter {
                 cwd: json_str(input, "cwd").into(),
                 permission_mode: String::new(),
                 prompt: json_str(input, "prompt").into(),
+                prompt_is_system_message: is_system_message(json_str(input, "prompt")),
+                requires_existing_session: false,
                 prompt_id: None,
                 worktree: None,
                 agent_id: None,
@@ -181,6 +183,8 @@ mod tests {
                 cwd: "/tmp".into(),
                 permission_mode: "".into(),
                 prompt: "hello".into(),
+                prompt_is_system_message: false,
+                requires_existing_session: false,
                 prompt_id: None,
                 worktree: None,
                 agent_id: None,

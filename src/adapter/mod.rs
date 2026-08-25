@@ -18,6 +18,12 @@ pub(crate) fn json_value_or_null(val: &serde_json::Value, key: &str) -> serde_js
     val.get(key).cloned().unwrap_or(serde_json::Value::Null)
 }
 
+pub(crate) fn is_system_message(value: &str) -> bool {
+    value.contains("<task-notification>")
+        || value.contains("<system-reminder>")
+        || value.contains("<task-")
+}
+
 /// Binding between an upstream agent-side hook trigger (as it appears in the
 /// agent's `settings.json`) and the internal `AgentEventKind` the sidebar
 /// produces once the hook fires.

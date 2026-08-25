@@ -57,27 +57,45 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             top_level,
         ),
         AgentEvent::SessionEnd {
+            agent,
+            session_id,
+            requires_existing_session,
             end_reason,
             top_level,
         } => {
+            if requires_existing_session
+                && !context::pane_tracks_host_session(pane, &agent, session_id.as_deref())
+            {
+                return 0;
+            }
             let notifications = notification_settings();
-            handlers::on_session_end(pane, agent_name, &end_reason, top_level, &notifications)
+            handlers::on_session_end(pane, &agent, &end_reason, top_level, &notifications)
         }
         AgentEvent::UserPromptSubmit {
             agent,
             cwd,
             permission_mode,
             prompt,
+            prompt_is_system_message,
+            requires_existing_session,
             prompt_id,
             worktree,
             session_id,
             ..
-        } => handlers::on_user_prompt_submit(
-            pane,
-            &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
-            &prompt,
-            prompt_id.as_deref(),
-        ),
+        } => {
+            if requires_existing_session
+                && !context::pane_tracks_host_session(pane, &agent, session_id.as_deref())
+            {
+                return 0;
+            }
+            handlers::on_user_prompt_submit(
+                pane,
+                &context::make_ctx(&agent, &cwd, &permission_mode, &worktree, &session_id),
+                &prompt,
+                prompt_is_system_message,
+                prompt_id.as_deref(),
+            )
+        }
         AgentEvent::Notification {
             agent,
             cwd,
@@ -157,15 +175,25 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             )
         }
         AgentEvent::SubagentStart {
+            agent,
+            session_id,
+            requires_existing_session,
             agent_type,
             agent_id,
             display_name,
-        } => handlers::on_subagent_start(
-            pane,
-            &agent_type,
-            display_name.as_deref(),
-            agent_id.as_deref(),
-        ),
+        } => {
+            if requires_existing_session
+                && !context::pane_tracks_host_session(pane, &agent, session_id.as_deref())
+            {
+                return 0;
+            }
+            handlers::on_subagent_start(
+                pane,
+                &agent_type,
+                display_name.as_deref(),
+                agent_id.as_deref(),
+            )
+        }
         AgentEvent::SubagentStop {
             agent_id,
             children_may_outlive_turn,
@@ -301,5 +329,182 @@ mod tests {
                 .contains("|Read|lib.rs")
         );
         let _ = fs::remove_file(log_path);
+    }
+
+    #[test]
+    fn grok_user_prompt_preserves_literal_system_tag_text() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_LITERAL_SYSTEM_TAG";
+        let adapter = resolve_adapter("grok").unwrap();
+
+        handle_event(
+            pane,
+            "grok",
+            adapter
+                .parse(
+                    "session-start",
+                    &json!({"sessionId": "host-session", "cwd": "/repo"}),
+                )
+                .unwrap(),
+        );
+        handle_event(
+            pane,
+            "grok",
+            adapter
+                .parse(
+                    "user-prompt-submit",
+                    &json!({
+                        "sessionId": "host-session",
+                        "cwd": "/repo",
+                        "prompt": "explain <system-reminder>this literal tag</system-reminder>"
+                    }),
+                )
+                .unwrap(),
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT).as_deref(),
+            Some("explain <system-reminder>this literal tag</system-reminder>")
+        );
+    }
+
+    #[test]
+    fn stale_grok_session_end_does_not_clear_reused_pane() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STALE_GROK_SESSION_END";
+        let adapter = resolve_adapter("grok").unwrap();
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "claude");
+        tmux::test_mock::set(pane, tmux::PANE_SESSION_ID, "new-claude-session");
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
+
+        handle_event(
+            pane,
+            "grok",
+            adapter
+                .parse(
+                    "session-end",
+                    &json!({"sessionId": "old-grok-session", "reason": "other"}),
+                )
+                .unwrap(),
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_AGENT).as_deref(),
+            Some("claude")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SESSION_ID).as_deref(),
+            Some("new-claude-session")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("running")
+        );
+    }
+
+    #[test]
+    fn stale_grok_prompt_does_not_recreate_ended_session() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STALE_GROK_PROMPT";
+        let adapter = resolve_adapter("grok").unwrap();
+
+        handle_event(
+            pane,
+            "grok",
+            adapter
+                .parse(
+                    "user-prompt-submit",
+                    &json!({
+                        "sessionId": "ended-session",
+                        "cwd": "/repo",
+                        "prompt": "late prompt"
+                    }),
+                )
+                .unwrap(),
+        );
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_AGENT));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STATUS));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_PROMPT));
+    }
+
+    #[test]
+    fn stale_grok_subagent_start_does_not_recreate_ended_session() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%STALE_GROK_SUBAGENT_START";
+        let adapter = resolve_adapter("grok").unwrap();
+
+        handle_event(
+            pane,
+            "grok",
+            adapter
+                .parse(
+                    "subagent-start",
+                    &json!({
+                        "sessionId": "ended-session",
+                        "subagentId": "late-child",
+                        "subagentType": "general-purpose",
+                        "description": "Late child"
+                    }),
+                )
+                .unwrap(),
+        );
+
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
+    }
+
+    #[test]
+    fn current_grok_host_events_apply_then_session_end_tears_down() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%CURRENT_GROK_HOST_EVENTS";
+        let adapter = resolve_adapter("grok").unwrap();
+
+        for (event_name, payload) in [
+            (
+                "session-start",
+                json!({"sessionId": "host-session", "cwd": "/repo"}),
+            ),
+            (
+                "user-prompt-submit",
+                json!({
+                    "sessionId": "host-session",
+                    "cwd": "/repo",
+                    "prompt": "current prompt"
+                }),
+            ),
+            (
+                "subagent-start",
+                json!({
+                    "sessionId": "host-session",
+                    "subagentId": "child-session",
+                    "subagentType": "general-purpose",
+                    "description": "Current child"
+                }),
+            ),
+        ] {
+            handle_event(pane, "grok", adapter.parse(event_name, &payload).unwrap());
+        }
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT).as_deref(),
+            Some("current prompt")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
+            Some("Current child:child-session")
+        );
+
+        handle_event(
+            pane,
+            "grok",
+            adapter
+                .parse(
+                    "session-end",
+                    &json!({"sessionId": "host-session", "reason": "other"}),
+                )
+                .unwrap(),
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_AGENT));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
     }
 }

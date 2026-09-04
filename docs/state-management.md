@@ -162,6 +162,7 @@ Per-pane file-based state:
 Agent hooks (hook.sh)
   → CLI `hook` subcommand (cli/hook.rs)
     → resolve_adapter() (event.rs) → adapter.parse() → AgentEvent
+    → lock::acquire() (cli/hook/lock.rs) ← per-pane flock: hooks on one pane run one at a time
     → handle_event() writes @pane_* tmux options + /tmp activity log files
                         ↓
 TUI main loop (app::run in app.rs; submodules app/{setup,workers,input,render})

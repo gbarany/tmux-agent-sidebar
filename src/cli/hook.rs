@@ -5,6 +5,7 @@ use super::{read_stdin_json, tmux_pane};
 mod activity;
 mod context;
 mod handlers;
+mod lock;
 mod notifications;
 
 use context::sync_pane_location;
@@ -34,6 +35,10 @@ pub(crate) fn cmd_hook(args: &[String]) -> i32 {
         return 0;
     };
 
+    // Hooks are independent processes; serialize their read-modify-write
+    // over this pane's options so a Stop cannot settle on a child list a
+    // concurrent SubagentStart is still appending to.
+    let _lock = lock::acquire(&pane);
     handle_event(&pane, agent_name, event)
 }
 

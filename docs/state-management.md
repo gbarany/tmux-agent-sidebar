@@ -41,11 +41,11 @@ Pane options written to tmux:
 | `@pane_prompt_id` | UserPromptSubmit, Stop, TurnSettled, StopFailure | Losslessly encoded latest turn ID when exposed; retained after settlement so stale and duplicate turn-end hooks are ignored |
 | `@pane_turn_active` | UserPromptSubmit, Stop, TurnSettled, StopFailure | Parent-turn activity marker; keeps child tool events from reviving a settled background pane |
 | `@pane_prompt_source` | UserPromptSubmit, Stop | "user" or "response" |
-| `@pane_started_at` | UserPromptSubmit | Unix epoch when agent started |
+| `@pane_started_at` | UserPromptSubmit, ActivityLog (when unset), SubagentStart (late-child revival) | Unix epoch when agent started. Re-armed when a child registers after its parent turn already settled, so the revived background row still renders an elapsed label |
 | `@pane_attention` | SessionStart, Stop, TurnSettled, StopFailure (clear); Notification, PermissionDenied, TeammateIdle (set) | "notification" or "clear" |
 | `@pane_wait_reason` | StopFailure, PermissionDenied, TeammateIdle | Reason for waiting/error (`permission_denied`, `teammate_idle:<name>`, or error text) |
 | `@pane_bg_cmd` | ActivityLog (bg Bash), Refresh sweep (clear), SessionEnd (clear) | Latest sanitized command of a Bash tool started with `run_in_background`. Its presence is the single source of truth for "live bg shell" — Stop routes to `background` while it is set, and the row body renders the command. Persists across UserPromptSubmit so shells spanning turns stay visible; overwritten by the next bg Bash. The refresh loop runs a `ps`-based liveness sweep each tick and clears the marker (plus downgrades `background → idle`) when no process matches the stored command. Only the most recent bg Bash is tracked; older ones are not retained. |
-| `@pane_subagents` | SubagentStart/Stop | Comma-separated active subagent list; Grok background subagents survive parent-turn settlement |
+| `@pane_subagents` | SubagentStart/Stop | Comma-separated active subagent list; Grok background subagents survive parent-turn settlement. A registration that loses the race against its parent's `Stop` revives the pane's background lifecycle instead of leaving live work shown as completed |
 | `@pane_worktree_name` | SessionStart | Worktree name (if applicable) |
 | `@pane_worktree_branch` | SessionStart | Worktree branch (if applicable) |
 | `@pane_session_id` | SessionStart, UserPromptSubmit, Notification, Stop, TurnSettled, StopFailure, PermissionDenied, CwdChanged | Agent-reported session id (skipped when subagents are active) |

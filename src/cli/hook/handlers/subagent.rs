@@ -60,6 +60,11 @@ fn revive_background_for_late_child(pane: &str, children_may_outlive_turn: bool)
     if tmux::get_pane_option_value(pane, tmux::PANE_STARTED_AT).is_empty() {
         tmux::set_pane_option(pane, tmux::PANE_STARTED_AT, &now_epoch_secs().to_string());
     }
+    // A resumed or compacted session settles to `idle` while still carrying
+    // its `session_resumed*` reason. That reason belongs to the turn that
+    // just ended, not to the child starting now, so drop it exactly as the
+    // sibling background branch in `on_subagent_stop` does.
+    tmux::unset_pane_option(pane, tmux::PANE_WAIT_REASON);
     set_status(pane, "background");
 }
 
@@ -198,16 +203,25 @@ mod tests {
         tmux::test_mock::set(pane, tmux::PANE_AGENT, tmux::GROK_AGENT);
         tmux::test_mock::set(pane, tmux::PANE_STATUS, "idle");
 
+        let before = crate::time::now_epoch_secs();
         on_subagent_start(pane, "Explore", None, Some("sub-1"), true);
+        let after = crate::time::now_epoch_secs();
 
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
             Some("background"),
             "a child registering after settlement must not stay hidden behind an idle pane"
         );
+        // Pin the value, not just the key: a timer re-armed to 0 or to
+        // milliseconds would still "contain" a timestamp while rendering a
+        // nonsense elapsed label.
+        let started_at: u64 = tmux::test_mock::get(pane, tmux::PANE_STARTED_AT)
+            .expect("the background elapsed label needs a re-armed timer")
+            .parse()
+            .expect("@pane_started_at must stay parseable epoch seconds");
         assert!(
-            tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT),
-            "the background elapsed label needs a re-armed timer"
+            (before..=after).contains(&started_at),
+            "expected a wall-clock re-arm in [{before}, {after}], got {started_at}"
         );
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
@@ -251,6 +265,51 @@ mod tests {
             tmux::test_mock::get(pane, tmux::PANE_STARTED_AT).as_deref(),
             Some("1700"),
             "a live turn keeps the timestamp its prompt submit set"
+        );
+    }
+
+    #[test]
+    fn subagent_start_during_an_active_turn_leaves_an_idle_pane_alone() {
+        // Isolates the `@pane_turn_active` gate: the status is already
+        // `idle`, so only the turn marker can hold the revival back. The
+        // sibling `running` test cannot pin this — its status guard
+        // short-circuits first.
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_START_IDLE_ACTIVE_TURN";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, tmux::GROK_AGENT);
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "idle");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+
+        on_subagent_start(pane, "Explore", None, Some("sub-1"), true);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle"),
+            "a live turn owns the status; only a settled turn may be revived"
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
+    }
+
+    #[test]
+    fn late_subagent_start_drops_a_stale_wait_reason_from_the_settled_turn() {
+        // A resumed session settles to `idle` while still carrying its
+        // `session_resumed*` reason; that reason belongs to the turn that
+        // ended, not to the child starting now.
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_LATE_STALE_WAIT_REASON";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, tmux::GROK_AGENT);
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "idle");
+        tmux::test_mock::set(pane, tmux::PANE_WAIT_REASON, "session_resumed_compact");
+
+        on_subagent_start(pane, "Explore", None, Some("sub-1"), true);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("background")
+        );
+        assert!(
+            !tmux::test_mock::contains(pane, tmux::PANE_WAIT_REASON),
+            "a revived background pane must not keep the settled turn's reason"
         );
     }
 

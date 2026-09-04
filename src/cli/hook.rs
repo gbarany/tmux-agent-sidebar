@@ -553,6 +553,71 @@ mod tests {
     }
 
     #[test]
+    fn delayed_grok_subagent_start_revives_background_through_dispatch() {
+        // Covers the dispatch wiring itself: the SubagentStart arm must
+        // forward `children_may_outlive_turn` from the adapter. Handler-level
+        // tests cannot catch a dispatch that hard-codes `false`.
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_LATE_CHILD_DISPATCH";
+        let adapter = resolve_adapter("grok").unwrap();
+
+        for (event_name, payload) in [
+            (
+                "session-start",
+                json!({"sessionId": "host-session", "cwd": "/repo"}),
+            ),
+            (
+                "user-prompt-submit",
+                json!({
+                    "sessionId": "host-session",
+                    "cwd": "/repo",
+                    "prompt": "audit the adapters",
+                    "promptId": "p-1"
+                }),
+            ),
+            // The host Stop wins the race against the child's start hook.
+            (
+                "stop",
+                json!({
+                    "sessionId": "host-session",
+                    "cwd": "/repo",
+                    "lastAssistantMessage": "done",
+                    "promptId": "p-1"
+                }),
+            ),
+        ] {
+            handle_event(pane, "grok", adapter.parse(event_name, &payload).unwrap());
+        }
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle"),
+            "Stop settles on an empty child list"
+        );
+
+        handle_event(
+            pane,
+            "grok",
+            adapter
+                .parse(
+                    "subagent-start",
+                    &json!({
+                        "sessionId": "host-session",
+                        "subagentId": "sub-1",
+                        "subagentType": "general-purpose",
+                        "description": "Late child"
+                    }),
+                )
+                .unwrap(),
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("background"),
+            "the adapter's child-lifetime policy must survive dispatch"
+        );
+    }
+
+    #[test]
     fn current_grok_host_events_apply_then_session_end_tears_down() {
         let _guard = tmux::test_mock::install();
         let pane = "%CURRENT_GROK_HOST_EVENTS";

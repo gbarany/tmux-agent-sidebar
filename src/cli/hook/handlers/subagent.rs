@@ -1,5 +1,6 @@
 use crate::cli::{set_attention, set_status};
 use crate::desktop_notification;
+use crate::time::now_epoch_secs;
 use crate::tmux;
 
 use super::super::context::{
@@ -12,6 +13,7 @@ pub(in crate::cli::hook) fn on_subagent_start(
     agent_type: &str,
     display_name: Option<&str>,
     agent_id: Option<&str>,
+    children_may_outlive_turn: bool,
 ) -> i32 {
     // Claude Code always sends agent_id per the hooks spec; drop the
     // event silently if it's missing so the tree never gains an
@@ -22,7 +24,43 @@ pub(in crate::cli::hook) fn on_subagent_start(
     let current = tmux::get_pane_option_value(pane, tmux::PANE_SUBAGENTS);
     let new_val = append_subagent(&current, agent_type, display_name, id);
     tmux::set_pane_option(pane, tmux::PANE_SUBAGENTS, &new_val);
+    revive_background_for_late_child(pane, children_may_outlive_turn);
     0
+}
+
+/// A child's hook process can be delayed past the host `Stop` that ends the
+/// same turn. The stop handler then saw an empty child list, settled the
+/// pane to `idle` and cleared its timer — so this registration is the first
+/// evidence that background work outlived the turn, and the child would
+/// otherwise sit invisible behind a "completed" pane until some unrelated
+/// event repainted it.
+///
+/// Only adapters that declare children may outlive the turn revive the
+/// lifecycle: where children die with their turn, a start arriving after
+/// settlement is stale and must never resurrect a finished pane.
+///
+/// Only `idle` is upgraded. `running` belongs to a turn that is still live,
+/// `waiting` still needs the user (see `status_priority`), `error` must stay
+/// visible, and an empty status means the pane is not tracked at all.
+///
+/// The completion notification `Stop` already fired cannot be retracted, but
+/// this path adds no second one: `Stop` left no pending body behind, so the
+/// final child stop settles the pane silently.
+fn revive_background_for_late_child(pane: &str, children_may_outlive_turn: bool) {
+    if !children_may_outlive_turn {
+        return;
+    }
+    let turn_settled = tmux::get_pane_option_value(pane, tmux::PANE_TURN_ACTIVE).is_empty();
+    if !turn_settled || tmux::get_pane_option_value(pane, tmux::PANE_STATUS) != "idle" {
+        return;
+    }
+    // `clear_run_state` dropped the submit timestamp when the turn settled;
+    // re-arm it so the background elapsed label counts from the moment the
+    // sidebar learned the child exists.
+    if tmux::get_pane_option_value(pane, tmux::PANE_STARTED_AT).is_empty() {
+        tmux::set_pane_option(pane, tmux::PANE_STARTED_AT, &now_epoch_secs().to_string());
+    }
+    set_status(pane, "background");
 }
 
 pub(in crate::cli::hook) fn on_subagent_stop(
@@ -86,10 +124,11 @@ pub(in crate::cli::hook) fn on_subagent_stop(
 
 #[cfg(test)]
 mod tests {
+    use super::super::run::{on_stop, on_user_prompt_submit};
     use super::super::session::on_session_end;
     use super::super::worktree::on_worktree_remove;
     use super::*;
-    use crate::cli::hook::context::{PENDING_SESSION_END, PENDING_WORKTREE_REMOVE};
+    use crate::cli::hook::context::{AgentContext, PENDING_SESSION_END, PENDING_WORKTREE_REMOVE};
     use crate::desktop_notification;
     use std::fs;
 
@@ -104,12 +143,12 @@ mod tests {
     fn on_subagent_start_appends_to_list() {
         let _guard = tmux::test_mock::install();
         let pane = "%SUB_START";
-        on_subagent_start(pane, "Explore", None, Some("sub-1"));
+        on_subagent_start(pane, "Explore", None, Some("sub-1"), false);
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
             Some("Explore:sub-1")
         );
-        on_subagent_start(pane, "Plan", None, Some("sub-2"));
+        on_subagent_start(pane, "Plan", None, Some("sub-2"), false);
         assert_eq!(
             tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
             Some("Explore:sub-1,Plan:sub-2")
@@ -126,6 +165,7 @@ mod tests {
             "general-purpose",
             Some("Code review: tests, types\nand errors"),
             Some("01a0380d-9cc4-7312-a767-351c89120226"),
+            false,
         );
 
         assert_eq!(
@@ -138,10 +178,176 @@ mod tests {
     fn on_subagent_start_drops_event_without_id() {
         let _guard = tmux::test_mock::install();
         let pane = "%SUB_NO_ID";
-        on_subagent_start(pane, "Explore", None, None);
+        on_subagent_start(pane, "Explore", None, None, false);
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
-        on_subagent_start(pane, "Explore", None, Some(""));
+        on_subagent_start(pane, "Explore", None, Some(""), false);
         assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
+    }
+
+    // ─── late child-start race ──────────────────────────────────────
+    //
+    // A child's hook process can lose the race against the host `Stop`
+    // that ends the same turn. `Stop` then settles the pane on an empty
+    // child list, so the registration that lands afterwards is the only
+    // chance to put the pane back into its background lifecycle.
+
+    #[test]
+    fn late_subagent_start_revives_background_when_children_outlive_the_turn() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_LATE_REVIVE";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, tmux::GROK_AGENT);
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "idle");
+
+        on_subagent_start(pane, "Explore", None, Some("sub-1"), true);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("background"),
+            "a child registering after settlement must not stay hidden behind an idle pane"
+        );
+        assert!(
+            tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT),
+            "the background elapsed label needs a re-armed timer"
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_SUBAGENTS).as_deref(),
+            Some("Explore:sub-1")
+        );
+    }
+
+    #[test]
+    fn late_subagent_start_leaves_pane_idle_when_children_die_with_the_turn() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_LATE_STALE";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, "claude");
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "idle");
+
+        on_subagent_start(pane, "Explore", None, Some("sub-1"), false);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle"),
+            "a child that cannot outlive its turn must never resurrect a settled pane"
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
+    }
+
+    #[test]
+    fn subagent_start_during_an_active_turn_keeps_the_running_status() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_START_ACTIVE_TURN";
+        tmux::test_mock::set(pane, tmux::PANE_AGENT, tmux::GROK_AGENT);
+        tmux::test_mock::set(pane, tmux::PANE_STATUS, "running");
+        tmux::test_mock::set(pane, tmux::PANE_TURN_ACTIVE, "1");
+        tmux::test_mock::set(pane, tmux::PANE_STARTED_AT, "1700");
+
+        on_subagent_start(pane, "Explore", None, Some("sub-1"), true);
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("running")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STARTED_AT).as_deref(),
+            Some("1700"),
+            "a live turn keeps the timestamp its prompt submit set"
+        );
+    }
+
+    #[test]
+    fn subagent_start_never_downgrades_a_non_idle_settled_pane() {
+        let _guard = tmux::test_mock::install();
+
+        // `waiting` still needs the user, `error` must stay visible,
+        // `background` is already correct, and an empty status means the
+        // pane is not tracked at all.
+        for status in ["waiting", "error", "background"] {
+            let pane = format!("%SUB_START_KEEP_{}", status.to_uppercase());
+            tmux::test_mock::set(&pane, tmux::PANE_AGENT, tmux::GROK_AGENT);
+            tmux::test_mock::set(&pane, tmux::PANE_STATUS, status);
+
+            on_subagent_start(&pane, "Explore", None, Some("sub-1"), true);
+
+            assert_eq!(
+                tmux::test_mock::get(&pane, tmux::PANE_STATUS).as_deref(),
+                Some(status),
+                "a settled {status} pane must survive a child registration"
+            );
+        }
+
+        let untracked = "%SUB_START_KEEP_UNTRACKED";
+        on_subagent_start(untracked, "Explore", None, Some("sub-1"), true);
+        assert!(
+            !tmux::test_mock::contains(untracked, tmux::PANE_STATUS),
+            "an untracked pane must not gain a status from a child registration"
+        );
+        assert!(!tmux::test_mock::contains(untracked, tmux::PANE_STARTED_AT));
+    }
+
+    #[test]
+    fn delayed_child_start_after_stop_recovers_background_and_settles_once() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%SUB_LATE_START_RACE";
+        let agent = tmux::GROK_AGENT.to_string();
+        let cwd = "/repo".to_string();
+        let permission_mode = "default".to_string();
+        let worktree = None;
+        let session_id = None;
+        let ctx = AgentContext {
+            agent: &agent,
+            cwd: &cwd,
+            permission_mode: &permission_mode,
+            worktree: &worktree,
+            session_id: &session_id,
+        };
+
+        on_user_prompt_submit(pane, &ctx, "audit the adapters", false, Some("prompt-1"));
+
+        // The host Stop wins the race: the child's start hook has not landed
+        // yet, so the pane settles on an empty child list and the completion
+        // notification fires now — that one cannot be taken back.
+        on_stop(
+            pane,
+            &ctx,
+            "done",
+            None,
+            Some("prompt-1"),
+            true,
+            &default_notifications(),
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(
+            pane,
+            tmux::PANE_PENDING_STOP_NOTIFICATION_BODY
+        ));
+
+        // The delayed registration arrives and restores the background
+        // lifecycle instead of leaving live work displayed as completed.
+        on_subagent_start(pane, "Explore", None, Some("sub-1"), true);
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("background")
+        );
+        assert!(tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
+
+        // The child finishes: the pane settles back to idle, and because
+        // Stop left no pending body there is no second notification.
+        on_subagent_stop(pane, Some("sub-1"), true, &default_notifications());
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("idle")
+        );
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_SUBAGENTS));
+        assert!(!tmux::test_mock::contains(pane, tmux::PANE_STARTED_AT));
+        assert!(!tmux::test_mock::contains(
+            pane,
+            tmux::PANE_PENDING_STOP_NOTIFICATION_BODY
+        ));
+
+        fs::remove_file(crate::activity::log_file_path(pane)).ok();
     }
 
     #[test]

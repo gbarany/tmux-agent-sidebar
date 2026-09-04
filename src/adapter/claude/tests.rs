@@ -261,6 +261,7 @@ fn subagent_start() {
             agent_type: "Explore".into(),
             agent_id: None,
             display_name: None,
+            children_may_outlive_turn: false,
         }
     );
 }
@@ -278,6 +279,7 @@ fn subagent_start_captures_agent_id() {
             agent_type: "Explore".into(),
             agent_id: Some("sub-42".into()),
             display_name: None,
+            children_may_outlive_turn: false,
         }
     );
 }

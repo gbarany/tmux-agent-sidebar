@@ -273,6 +273,7 @@ impl EventAdapter for GrokAdapter {
                     agent_type: agent_type.into(),
                     agent_id: Some(agent_id),
                     display_name: optional_str(input, &["description"]),
+                    children_may_outlive_turn: true,
                 })
             }
             "subagent-stop" => {
@@ -656,6 +657,7 @@ mod tests {
                 agent_type: "explore".into(),
                 agent_id: Some("subagent-1".into()),
                 display_name: Some("Review error handling".into()),
+                children_may_outlive_turn: true,
             })
         );
         assert_eq!(

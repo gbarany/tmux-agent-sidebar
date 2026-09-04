@@ -123,6 +123,10 @@ pub enum AgentEvent {
         agent_id: Option<String>,
         /// Optional human-readable identity supplied separately from the type.
         display_name: Option<String>,
+        /// Whether a child registering after the parent turn already settled
+        /// revives the pane's background lifecycle. False for agents whose
+        /// children die with the turn — there a late start is stale.
+        children_may_outlive_turn: bool,
     },
     SubagentStop {
         agent_type: String,

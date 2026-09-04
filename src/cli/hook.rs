@@ -201,6 +201,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
             agent_type,
             agent_id,
             display_name,
+            children_may_outlive_turn,
         } => {
             if requires_existing_session
                 && !context::pane_tracks_host_session(pane, &agent, session_id.as_deref())
@@ -212,6 +213,7 @@ fn handle_event(pane: &str, agent_name: &str, event: AgentEvent) -> i32 {
                 &agent_type,
                 display_name.as_deref(),
                 agent_id.as_deref(),
+                children_may_outlive_turn,
             )
         }
         AgentEvent::SubagentStop {

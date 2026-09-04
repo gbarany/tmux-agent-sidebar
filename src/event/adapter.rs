@@ -230,6 +230,37 @@ mod tests {
     }
 
     #[test]
+    fn subagent_start_carries_the_same_child_turn_lifetime_policy_as_stop() {
+        // A child registering after its parent settled may only revive the
+        // background lifecycle for agents whose children outlive the turn,
+        // so SubagentStart must agree with Stop rather than carry its own
+        // policy. Codex and OpenCode emit no SubagentStart at all.
+        for (agent_name, payload, expected) in [
+            ("claude", json!({"agent_type": "Explore"}), false),
+            (
+                "grok",
+                json!({"subagentType": "explore", "subagentId": "sub-1"}),
+                true,
+            ),
+        ] {
+            let event = resolve_adapter(agent_name)
+                .unwrap()
+                .parse("subagent-start", &payload)
+                .unwrap();
+            assert!(
+                matches!(
+                    event,
+                    AgentEvent::SubagentStart {
+                        children_may_outlive_turn,
+                        ..
+                    } if children_may_outlive_turn == expected
+                ),
+                "unexpected child-turn lifetime policy for {agent_name}: {event:?}"
+            );
+        }
+    }
+
+    #[test]
     fn codex_ignores_claude_only_events() {
         let adapter = resolve_adapter("codex").unwrap();
         assert!(adapter.parse("notification", &json!({})).is_none());

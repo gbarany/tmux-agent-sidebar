@@ -136,8 +136,11 @@ pub(in crate::cli::hook) fn on_stop(
     }
     if !last_message.is_empty() {
         let msg = sanitize_tmux_value(last_message);
-        tmux::set_pane_option(pane, tmux::PANE_PROMPT, &msg);
+        // Source first: a refresh between the two writes must never pair
+        // this unclassified text with the previous `user` source, which the
+        // render path trusts without its tag filter.
         tmux::set_pane_option(pane, tmux::PANE_PROMPT_SOURCE, "response");
+        tmux::set_pane_option(pane, tmux::PANE_PROMPT, &msg);
     }
     let background = settle_turn_state(pane, ctx, prompt_id, children_may_outlive_turn);
     let notification_body = stop_body(last_message);

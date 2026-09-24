@@ -393,6 +393,71 @@ mod tests {
             tmux::test_mock::get(pane, tmux::PANE_PROMPT).as_deref(),
             Some("explain <system-reminder>this literal tag</system-reminder>")
         );
+        // Source `user` is what lets the render path show the literal tag;
+        // see `parse_pane_line_keeps_literal_system_tag_only_in_user_prompt`.
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT_SOURCE).as_deref(),
+            Some("user")
+        );
+    }
+
+    #[test]
+    fn grok_auto_wake_prompt_does_not_replace_the_row() {
+        let _guard = tmux::test_mock::install();
+        let pane = "%GROK_AUTO_WAKE";
+        let adapter = resolve_adapter("grok").unwrap();
+        let event = |name: &str, payload: Value| {
+            let mut input = json!({"sessionId": "host-session", "cwd": "/repo"});
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(payload.as_object().unwrap().clone());
+            adapter.parse(name, &input).unwrap()
+        };
+
+        handle_event(pane, "grok", event("session-start", json!({})));
+        handle_event(
+            pane,
+            "grok",
+            event(
+                "user-prompt-submit",
+                json!({"promptId": "turn-1", "prompt": "<user_query>review the diff</user_query>"}),
+            ),
+        );
+        handle_event(
+            pane,
+            "grok",
+            event(
+                "stop",
+                json!({"promptId": "turn-1", "lastAssistantMessage": "Started a reviewer."}),
+            ),
+        );
+        // The background subagent finished, so Grok wakes the session with
+        // its own reminder. The turn runs; the row keeps the last response.
+        handle_event(
+            pane,
+            "grok",
+            event(
+                "user-prompt-submit",
+                json!({
+                    "promptId": "subagent-completed-1",
+                    "prompt": "<system-reminder>\nWhile you were idle, 1 background subagent completed:\n</system-reminder>"
+                }),
+            ),
+        );
+
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT).as_deref(),
+            Some("Started a reviewer.")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_PROMPT_SOURCE).as_deref(),
+            Some("response")
+        );
+        assert_eq!(
+            tmux::test_mock::get(pane, tmux::PANE_STATUS).as_deref(),
+            Some("running")
+        );
     }
 
     #[test]

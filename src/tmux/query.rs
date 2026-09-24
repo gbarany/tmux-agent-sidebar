@@ -312,8 +312,9 @@ fn parse_pane_fields_with_processes(
     let prompt_source = &parts[pane_line_field::PROMPT_SOURCE];
     let prompt_is_response = prompt_source == "response";
 
-    // Sanitize prompt: replace pipes/newlines, filter system-injected messages, truncate
-    let prompt = sanitize_prompt(&parts[pane_line_field::PROMPT]);
+    // Sanitize prompt: filter system-injected messages, truncate. A `user`
+    // prompt was already classified by its adapter before the hook stored it.
+    let prompt = sanitize_prompt(&parts[pane_line_field::PROMPT], prompt_source == "user");
 
     let session_id = if parts[pane_line_field::SESSION_ID].is_empty() {
         None
@@ -485,16 +486,24 @@ fn apply_codex_permission_modes(
 }
 
 /// Sanitize prompt text from tmux variable so it's safe for display.
-fn sanitize_prompt(raw: &str) -> String {
+///
+/// `adapter_classified` is true for `@pane_prompt_source=user`: the hook
+/// stores a user prompt only after its adapter ruled it non-system
+/// (`prompt_is_system_message`), so a tag left in it is text the user typed,
+/// such as a literal `<system-reminder>` Grok keeps. Filtering it again here
+/// would blank a prompt the adapter kept. Stop responses carry no such
+/// classification and keep the filter.
+fn sanitize_prompt(raw: &str, adapter_classified: bool) -> String {
     if raw.is_empty() {
         return String::new();
     }
     // Filter known system-injected messages. Avoid the old broad angle-bracket
     // check so legitimate prompts containing comparisons or code snippets
     // still render.
-    if raw.contains("<task-notification>")
-        || raw.contains("<system-reminder>")
-        || raw.contains("<task-status>")
+    if !adapter_classified
+        && (raw.contains("<task-notification>")
+            || raw.contains("<system-reminder>")
+            || raw.contains("<task-status>"))
     {
         return String::new();
     }
@@ -678,35 +687,51 @@ mod tests {
     #[test]
     fn sanitize_prompt_filters_system_injected() {
         assert_eq!(
-            sanitize_prompt("<system-reminder>noise</system-reminder>"),
+            sanitize_prompt("<system-reminder>noise</system-reminder>", false),
             ""
         );
         assert_eq!(
-            sanitize_prompt("hello <task-notification>abc</task-notification> world"),
+            sanitize_prompt(
+                "hello <task-notification>abc</task-notification> world",
+                false
+            ),
             ""
         );
+    }
+
+    #[test]
+    fn sanitize_prompt_keeps_adapter_classified_tag_text() {
+        // Adapter-classified user prompts are not re-filtered, but they are
+        // still truncated like any other prompt.
+        assert_eq!(
+            sanitize_prompt("explain <system-reminder>x</system-reminder>", true),
+            "explain <system-reminder>x</system-reminder>"
+        );
+        let long = format!("<system-reminder>{}", "a".repeat(300));
+        assert_eq!(sanitize_prompt(&long, true).chars().count(), 200);
     }
 
     #[test]
     fn sanitize_prompt_passes_normal_text() {
-        assert_eq!(sanitize_prompt("fix the bug"), "fix the bug");
+        assert_eq!(sanitize_prompt("fix the bug", false), "fix the bug");
     }
 
     #[test]
     fn sanitize_prompt_keeps_legitimate_angle_brackets() {
-        assert_eq!(sanitize_prompt("1 < 2 and 3 > 1"), "1 < 2 and 3 > 1");
+        assert_eq!(sanitize_prompt("1 < 2 and 3 > 1", false), "1 < 2 and 3 > 1");
     }
 
     #[test]
     fn sanitize_prompt_truncates_long_text() {
         let long = "a".repeat(300);
-        let result = sanitize_prompt(&long);
+        let result = sanitize_prompt(&long, false);
         assert_eq!(result.chars().count(), 200);
     }
 
     #[test]
     fn sanitize_prompt_empty() {
-        assert_eq!(sanitize_prompt(""), "");
+        assert_eq!(sanitize_prompt("", false), "");
+        assert_eq!(sanitize_prompt("", true), "");
     }
 
     // ─── parse_subagents tests ──────────────────────────────────────
@@ -863,6 +888,31 @@ mod tests {
         let line = make_pane_line(&fields);
         let pane = parse_pane_line(&line).unwrap();
         assert!(pane.prompt_is_response);
+    }
+
+    #[test]
+    fn parse_pane_line_keeps_literal_system_tag_only_in_user_prompt() {
+        // The Grok adapter classifies a user-typed `<system-reminder>` as
+        // user text, and the hook stores it with source `user`. The render
+        // path must show it; a Stop response with the same tag stays hidden.
+        let literal = "explain <system-reminder>this literal tag</system-reminder>";
+        let mut fields = full_fields();
+        fields[pane_line_field::AGENT] = "grok";
+        fields[pane_line_field::PANE_CURRENT_COMMAND] = "grok";
+        fields[pane_line_field::PROMPT] = literal;
+
+        fields[pane_line_field::PROMPT_SOURCE] = "user";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert_eq!(pane.agent, AgentType::Grok);
+        assert_eq!(pane.prompt, literal);
+
+        fields[pane_line_field::PROMPT_SOURCE] = "response";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert_eq!(pane.prompt, "");
+
+        fields[pane_line_field::PROMPT_SOURCE] = "";
+        let pane = parse_pane_line(&make_pane_line(&fields)).unwrap();
+        assert_eq!(pane.prompt, "", "unknown source keeps the filter");
     }
 
     #[test]

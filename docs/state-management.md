@@ -40,7 +40,7 @@ Pane options written to tmux:
 | `@pane_prompt` | UserPromptSubmit, Stop | Latest prompt or response text |
 | `@pane_prompt_id` | UserPromptSubmit, Stop, TurnSettled, StopFailure | Losslessly encoded latest turn ID when exposed; retained after settlement so stale and duplicate turn-end hooks are ignored |
 | `@pane_turn_active` | UserPromptSubmit, Stop, TurnSettled, StopFailure | Parent-turn activity marker; keeps child tool events from reviving a settled background pane |
-| `@pane_prompt_source` | UserPromptSubmit, Stop | "user" or "response" |
+| `@pane_prompt_source` | UserPromptSubmit, Stop | "user" or "response". A "user" prompt was already classified as non-system by its adapter, so the render path shows it as stored (truncated); any other source is blanked when it contains a system tag (`<system-reminder>`, `<task-notification>`, `<task-status>`) |
 | `@pane_started_at` | UserPromptSubmit, ActivityLog (when unset), SubagentStart (late-child revival) | Unix epoch when agent started. Re-armed when a child registers after its parent turn already settled, so the revived background row still renders an elapsed label |
 | `@pane_attention` | SessionStart, Stop, TurnSettled, StopFailure (clear); Notification, PermissionDenied, TeammateIdle (set) | "notification" or "clear" |
 | `@pane_wait_reason` | StopFailure, PermissionDenied, TeammateIdle | Reason for waiting/error (`permission_denied`, `teammate_idle:<name>`, or error text) |

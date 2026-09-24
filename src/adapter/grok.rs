@@ -92,12 +92,27 @@ fn optional_str(input: &Value, keys: &[&str]) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
+/// Blocks Grok appends after the `<user_query>` envelope.
+const GROK_PROMPT_TRAILERS: &[&str] = &["<skill_information>", "<system-reminder>"];
+
 fn extract_user_query(raw: &str) -> String {
+    const CLOSE: &str = "</user_query>";
     let trimmed = raw.trim();
     let Some(after_open) = trimmed.strip_prefix("<user_query>") else {
         return raw.to_string();
     };
-    let Some(close) = after_open.rfind("</user_query>") else {
+    // The envelope ends at the first close tag that ends the prompt or hands
+    // over to a Grok trailer; a later one can sit inside an attached file.
+    // Failing that, take the last, so a literal token the user typed stays.
+    let close = after_open
+        .match_indices(CLOSE)
+        .map(|(at, _)| at)
+        .find(|&at| {
+            let rest = after_open[at + CLOSE.len()..].trim_start();
+            rest.is_empty() || GROK_PROMPT_TRAILERS.iter().any(|t| rest.starts_with(t))
+        })
+        .or_else(|| after_open.rfind(CLOSE));
+    let Some(close) = close else {
         return raw.to_string();
     };
     after_open[..close].trim().to_string()
@@ -176,12 +191,18 @@ impl EventAdapter for GrokAdapter {
                 top_level: true,
             }),
             "user-prompt-submit" if !is_subagent_event(input) => {
+                let prompt = extract_user_query(json_str(input, &["prompt"]));
+                // Grok opens the turns it starts itself with its own
+                // `<system-reminder>` block: an auto-wake (task and subagent
+                // completions) as the bare prompt, a `/goal` kickoff inside
+                // the envelope. A tag anywhere else is text the user typed.
+                let prompt_is_system_message = prompt.trim_start().starts_with("<system-reminder>");
                 Some(AgentEvent::UserPromptSubmit {
                     agent: GROK_AGENT.into(),
                     cwd: json_str(input, &["cwd"]).into(),
                     permission_mode: json_str(input, &["permissionMode", "permission_mode"]).into(),
-                    prompt: extract_user_query(json_str(input, &["prompt"])),
-                    prompt_is_system_message: false,
+                    prompt,
+                    prompt_is_system_message,
                     requires_existing_session: true,
                     prompt_id: optional_str(input, &["promptId", "prompt_id"]),
                     worktree: None,
@@ -378,6 +399,13 @@ mod tests {
                 "<user_query>\nexplain the literal </user_query> token\n</user_query>",
                 "explain the literal </user_query> token",
             ),
+            // An attached file quoting the close tag must not pull Grok's
+            // reminder into the query.
+            (
+                "<user_query>\nfix the parser\n</user_query>\n\n\
+                 <system-reminder><attached_files>rfind(\"</user_query>\")</attached_files></system-reminder>",
+                "fix the parser",
+            ),
         ];
 
         for (prompt, expected) in cases {
@@ -397,7 +425,7 @@ mod tests {
             "plain prompt",
             "explain <user_query>this example</user_query>",
             "<user_query>unfinished",
-            "<system-reminder>literal user-authored example</system-reminder>",
+            "explain <system-reminder>literal user-authored example</system-reminder>",
         ];
 
         for prompt in cases {
@@ -407,6 +435,49 @@ mod tests {
             assert!(
                 matches!(event, AgentEvent::UserPromptSubmit { prompt: actual, .. } if actual == prompt),
                 "changed non-envelope prompt {prompt:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn user_prompt_submit_classifies_turns_grok_starts_itself() {
+        let auto_wake = "<system-reminder>\nWhile you were idle, 1 background subagent completed:\n\
+                         - [explore] \"scan\" — completed successfully\n</system-reminder>";
+        let goal = "<system-reminder>\nA goal has been set: ship it\n</system-reminder>";
+        let cases = [
+            // Typed text keeps a literal tag the user wrote, with or without
+            // the envelope.
+            (
+                "<user_query>\nexplain <system-reminder>this tag</system-reminder>\n</user_query>",
+                "explain <system-reminder>this tag</system-reminder>",
+                false,
+            ),
+            (
+                "explain <system-reminder>this tag</system-reminder>",
+                "explain <system-reminder>this tag</system-reminder>",
+                false,
+            ),
+            ("plain prompt", "plain prompt", false),
+            // Turns Grok starts itself open with its own reminder: an
+            // auto-wake bare, a `/goal` kickoff inside the envelope.
+            (auto_wake, auto_wake, true),
+            (&format!("<user_query>\n{goal}\n</user_query>"), goal, true),
+        ];
+
+        for (raw, expected_prompt, expected_system) in cases {
+            let event = GrokAdapter
+                .parse(
+                    "user-prompt-submit",
+                    &json!({"prompt": raw, "promptId": "turn-1"}),
+                )
+                .unwrap();
+            assert!(
+                matches!(
+                    &event,
+                    AgentEvent::UserPromptSubmit { prompt, prompt_is_system_message, .. }
+                        if prompt == expected_prompt && *prompt_is_system_message == expected_system
+                ),
+                "misclassified Grok prompt {raw:?}: {event:?}"
             );
         }
     }
